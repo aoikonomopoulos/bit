@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "reil.h"
 
@@ -36,6 +37,10 @@ void reil_get_string(reil_instruction * instruction, char * string, size_t size)
 
     bytes_left -= bytes_written;
     total_bytes_written += bytes_written;
+
+    /* See if instruction has operands */
+    if ( !instruction->operand_flags )
+        return;
     
     for (i = 0; i < REIL_NUMBER_OF_INSTRUCTION_OPERANDS; i++)
     {
@@ -46,15 +51,27 @@ void reil_get_string(reil_instruction * instruction, char * string, size_t size)
         }
         else if (operand->type == REIL_OPERAND_INTEGER) 
         {
-            bytes_written = snprintf(string+total_bytes_written, bytes_left, " 0x%x", operand->reg);
+            if ( operand->size == 1)
+                bytes_written = snprintf(string+total_bytes_written, bytes_left, " 0x%02x/%u", operand->integer, operand->size);
+            else if ( operand->size == 2)
+                bytes_written = snprintf(string+total_bytes_written, bytes_left, " 0x%04x/%u", operand->integer, operand->size);
+            else if ( operand->size == 4)
+                bytes_written = snprintf(string+total_bytes_written, bytes_left, " 0x%08x/%u", operand->integer, operand->size);
+            else if ( operand->size == 8)
+                bytes_written = snprintf(string+total_bytes_written, bytes_left, " 0x%016x/%u", operand->integer, operand->size);
+            else
+            {
+                fprintf(stderr, "Invalid operand size!\n");
+                exit(EXIT_FAILURE);
+            }
         }
         else if (operand->type == REIL_OPERAND_REGISTER) 
         {
-            bytes_written = snprintf(string+total_bytes_written, bytes_left, " T%u", operand->reg);
+            bytes_written = snprintf(string+total_bytes_written, bytes_left, " T%u/%u", operand->reg, operand->size);
         }
         else if (operand->type == REIL_OPERAND_SUBADDRESS) 
         {
-            bytes_written = snprintf(string+total_bytes_written, bytes_left, " loc_%xh", operand->reg);
+            bytes_written = snprintf(string+total_bytes_written, bytes_left, " loc_%xh", operand->subaddress);
         }
 
         if ( bytes_written >= bytes_left )

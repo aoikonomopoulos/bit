@@ -50,6 +50,11 @@ typedef enum _reil_operand_type
     REIL_OPERAND_SUBADDRESS,
 } reil_operand_type;
 
+#define REIL_OPERAND_NONE   0x0
+#define REIL_OPERAND_INPUT1 0x1
+#define REIL_OPERAND_INPUT2 0x2
+#define REIL_OPERAND_OUTPUT 0x4
+
 typedef struct _reil_operand
 {
     reil_operand_type type;
@@ -90,6 +95,7 @@ typedef struct _reil_instruction
      * to multiple reil instructions.
      * */
     unsigned char offset;
+    unsigned char operand_flags;
     reil_operand operands[REIL_NUMBER_OF_INSTRUCTION_OPERANDS];
     reil_instruction_metadata * metadata;
 
