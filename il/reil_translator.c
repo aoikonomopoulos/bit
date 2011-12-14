@@ -26,17 +26,20 @@ int main(int argc, char** argv)
         if ( len != 0 )
         {
             size_t i;
-            reil_instructions * instructions = reil_translate(c, &x86_instruction);
-            reil_instruction * instruction = &instructions->instruction[i];
-            
-            char instruction_string[256];
-            reil_get_string(instruction, instruction_string, sizeof(instruction_string));
-
             char x86_instruction_string[256];
             get_instruction_string(&x86_instruction, FORMAT_INTEL, c, x86_instruction_string,
                     sizeof(x86_instruction_string));
-            printf("%#8x %s // %s\n", instruction->address + instruction->offset,
-                instruction_string, x86_instruction_string);
+
+            reil_instructions * instructions = reil_translate(c, &x86_instruction);
+            for ( i = 0; i < instructions->size; i++)
+            {
+                reil_instruction * instruction = &instructions->instruction[i];
+
+                char instruction_string[256];
+                reil_get_string(instruction, instruction_string, sizeof(instruction_string));
+                printf("0x%08x %s // %s\n", instruction->address + instruction->offset,
+                        instruction_string, x86_instruction_string);
+            }
 
             free(instructions);
         }
@@ -53,7 +56,9 @@ int main(int argc, char** argv)
 
 void usage(const char * progname)
 {
-    printf("Usage: %s FILE\n", progname);
+    printf("Usage: %s [--arch] FILE\n"
+           "    --arch      - Architecture of FILE, default is x86\n",
+           progname);
 }
 
 unsigned char * read_file(size_t *len, char *name)
