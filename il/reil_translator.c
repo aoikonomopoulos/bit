@@ -4,9 +4,11 @@
 #include <string.h>
 #include <sys/stat.h>
 #include "libdasm.h"
+#include "reil.h"
+#include "reil_x86_translator.h"
 
 void usage(const char * progname);
-unsigned char * read_file(int *len, char *name);
+unsigned char * read_file(size_t *len, char *name);
 int main(int argc, char** argv)
 {
     if (argc != 2)
@@ -15,50 +17,32 @@ int main(int argc, char** argv)
         exit(EXIT_FAILURE);
     }
 
-    INSTRUCTION inst;
-    int len, buflen, c = 0;
+    INSTRUCTION x86_instruction;
+    size_t len, buflen, c = 0;
     BYTE * buf = read_file(&buflen, argv[1]);
-    char inst_str[256];
     do 
     {
-        len = get_instruction(&inst, buf+c, MODE_32);
+        len = get_instruction(&x86_instruction, buf+c, MODE_32);
         if ( len != 0 )
         {
-            get_instruction_string(&inst, FORMAT_INTEL, c, inst_str, sizeof(inst_str));
-            if ( inst.type == INSTRUCTION_TYPE_ADD )
-            {
-                if ( inst.op1.type == OPERAND_TYPE_REGISTER )
-                {
-                    if ( inst.op2.type == OPERAND_TYPE_REGISTER )
-                    {
-                        printf("%#8x ADD T%i,T%i,T%i // %s\n",
-                                c * 256, inst.op1.reg, inst.op2.reg,
-                                inst.op1.reg, inst_str);
-                    }
-                    else if ( inst.op2.type == OPERAND_TYPE_IMMEDIATE )
-                    {
-                        printf("%#8x ADD T%i,%#x,T%i // %s\n",
-                                c * 256, inst.op1.reg, inst.op2.immediate,
-                                inst.op1.reg, inst_str);
-                    }
-                    else
-                    {
-                        printf("%#8x UNKN\n", c * 256);
-                    }
-                }
-                else
-                {
-                    printf("%#8x UNKN // %s\n", c * 256, inst_str);
-                }
-            }
-            else
-            {
-                printf("%#8x UNKN // %s\n", c * 256, inst_str);
-            }
+            size_t i;
+            reil_instructions * instructions = reil_translate(c, &x86_instruction);
+            reil_instruction * instruction = &instructions->instruction[i];
+            
+            char instruction_string[256];
+            reil_get_string(instruction, instruction_string, sizeof(instruction_string));
+
+            char x86_instruction_string[256];
+            get_instruction_string(&x86_instruction, FORMAT_INTEL, c, x86_instruction_string,
+                    sizeof(x86_instruction_string));
+            printf("%#8x %s // %s\n", instruction->address + instruction->offset,
+                instruction_string, x86_instruction_string);
+
+            free(instructions);
         }
         else
         {
-            printf("%#8x UNKN\n", c * 256);
+            printf("%#8x Invalid x86 instruction", c);
             len = 1;
         }
         c += len;
@@ -72,7 +56,7 @@ void usage(const char * progname)
     printf("Usage: %s FILE\n", progname);
 }
 
-unsigned char * read_file(int *len, char *name)
+unsigned char * read_file(size_t *len, char *name)
 {
         unsigned char            *buf;
         FILE            *fp;

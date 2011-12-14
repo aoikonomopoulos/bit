@@ -1,12 +1,25 @@
 CC=gcc
-CFLAGS=
+CFLAGS=-Wall -g
 
-all: reil_translator
+sources=reil_translator.c libdasm.c reil.c reil_x86_translator.c
+objects=$(sources:.c=.o)
+program=reil_translator
 
-reil_translator: libdasm.o reil_translator.o
-	$(CC) $(CFLAGS) -c libdasm.c
-	$(CC) $(CFLAGS) -c  reil_translator.c
-	$(CC) $(CFLAGS) reil_translator.o libdasm.o -o reil_translator
+all: $(program)
 
+include $(sources:.c=.d)
+
+$(program): $(objects)
+	$(CC) $(CFLAGS) $(objects) -o $(program)
+
+# Generate dependencies, excluding system headers.
+%.d: %.c
+	@set -e; rm -f $@; \
+	$(CC) -MM $(CPPFLAGS) $< > $@.$$$$; \
+	sed 's,\($*\)\.o[ :]*,\1.o $@ : ,g' < $@.$$$$ > $@; \
+	rm -f $@.$$$$
+
+
+.PHONY : clean
 clean:
-	rm -f *.o
+	rm -f $(objects) $(program)
