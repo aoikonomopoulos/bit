@@ -64,7 +64,7 @@ int main(int argc, char** argv)
 
                 char instruction_string[256];
                 reil_get_string(instruction, instruction_string, sizeof(instruction_string));
-                printf("0x%08x %s // %s\n", instruction->address + instruction->offset,
+                printf("0x%08x %-30s // %s\n", instruction->address + instruction->offset,
                         instruction_string, x86_instruction_string);
             }
 
@@ -72,7 +72,7 @@ int main(int argc, char** argv)
         }
         else
         {
-            printf("%#8x Invalid x86 instruction", c);
+            printf("%#8zx Invalid x86 instruction", c);
             len = 1;
         }
         c += len;
