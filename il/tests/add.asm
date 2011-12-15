@@ -1,1 +1,2 @@
-add eax,0x1
+BITS 32
+add dword [eax], edx
