@@ -28,7 +28,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef REIL_H
 #define REIL_H
 
-#define REIL_NUMBER_OF_INSTRUCTION_OPERANDS 3
+#define REIL_MAX_INSTRUCTIONS 256 
+#define REIL_MAX_OPERANDS 3
 
 typedef enum _reil_instruction_group
 {
@@ -123,7 +124,7 @@ typedef struct _reil_instruction
      * */
     unsigned char offset;
     unsigned char operand_flags;
-    reil_operand operands[REIL_NUMBER_OF_INSTRUCTION_OPERANDS];
+    reil_operand operands[REIL_MAX_OPERANDS];
     reil_instruction_metadata * metadata;
 
 } reil_instruction;

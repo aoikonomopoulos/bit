@@ -69,7 +69,7 @@ void reil_get_string(reil_instruction * instruction, char * string, size_t size)
     if ( !instruction->operand_flags )
         return;
     
-    for (i = 0; i < REIL_NUMBER_OF_INSTRUCTION_OPERANDS; i++)
+    for (i = 0; i < REIL_MAX_OPERANDS; i++)
     {
         reil_operand * operand = &instruction->operands[i];
         if (operand->type == REIL_OPERAND_EMPTY) 
@@ -107,7 +107,7 @@ void reil_get_string(reil_instruction * instruction, char * string, size_t size)
         bytes_left -= bytes_written;
         total_bytes_written += bytes_written;
 
-        if ( i != REIL_NUMBER_OF_INSTRUCTION_OPERANDS - 1)
+        if ( i != REIL_MAX_OPERANDS - 1)
         {
             bytes_written = snprintf(string+total_bytes_written, bytes_left, ",");
             if ( bytes_written >= bytes_left )
