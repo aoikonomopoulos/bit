@@ -50,69 +50,60 @@ static __inline__ enum Mode MODE_CHECK_OPERAND(enum Mode mode, int flags) {
 		return MODE_16;
 }
 
+/* Buffer used to store intermediate result during the translation process. */
+reil_instruction instruction_buffer[REIL_MAX_INSTRUCTIONS];
 int translate_operand(INSTRUCTION * instruction, OPERAND * source_operand, reil_operand * operand);
 
 reil_instructions * reil_translate(unsigned long address, INSTRUCTION * instruction)
 {
+    /* size holds the number of reil instructions, which is at least one. */
+    size_t size = 1;
+    unsigned int lowest_index = REIL_MAX_INSTRUCTIONS - 1 - 4;
     reil_instructions * translated_instructions = NULL;
     if ( instruction->type == INSTRUCTION_TYPE_ADD )
     {
-        translated_instructions = malloc(sizeof(reil_instructions) + sizeof(reil_instruction));
-        if (!translated_instructions)
-        {
-            fprintf(stderr, "Failed to allocate memory for translated instructions!");
-            exit(EXIT_FAILURE);
-        }
-        translated_instructions->size = 1;
-
-        reil_instruction * translated_instruction = &translated_instructions->instruction[0];
+        reil_instruction * translated_instruction = &instruction_buffer[lowest_index];
 
         translated_instruction->group = REIL_ARITHMETIC_INSTRUCTION;
         translated_instruction->index = REIL_ADD;
         translated_instruction->mnemonic = reil_mnemonics[translated_instruction->index];
         translated_instruction->operand_flags = REIL_OPERAND_INPUT1|REIL_OPERAND_INPUT2|REIL_OPERAND_OUTPUT;
-        translated_instruction->address = address << 8;
+        translated_instruction->address = REIL_ADDRESS(address);
         translated_instruction->offset = 0;
         translated_instruction->metadata = NULL;
 
+        /* First operand of ADD can be a register or a memory location.
+         * A memory location requires an extra load instruction.  */
         if ( translate_operand(instruction, &instruction->op1, &translated_instruction->operands[0]) )
         {
             if (instruction->op1.basereg != REG_NOP && instruction->op1.indexreg == REG_NOP) 
             {
-                reil_instruction extra_load_instruction;
-                extra_load_instruction.group = REIL_DATATRANSFER_INSTRUCTION;
-                extra_load_instruction.index= REIL_LDM;
-                extra_load_instruction.mnemonic = reil_mnemonics[extra_load_instruction.index];
-                extra_load_instruction.operand_flags = REIL_OPERAND_INPUT1|REIL_OPERAND_OUTPUT;
-                extra_load_instruction.address = address << 8;
-                extra_load_instruction.offset = 0;
-                extra_load_instruction.metadata = NULL;
+                size++;
+                lowest_index--;
 
-                extra_load_instruction.operands[0].type = REIL_OPERAND_REGISTER;
-                extra_load_instruction.operands[0].reg = instruction->op1.basereg;
-                extra_load_instruction.operands[0].size = (instruction->mode == MODE_32)?4:2;
+                reil_instruction * extra_load_instruction = &instruction_buffer[lowest_index];
+                extra_load_instruction->group = REIL_DATATRANSFER_INSTRUCTION;
+                extra_load_instruction->index= REIL_LDM;
+                extra_load_instruction->mnemonic = reil_mnemonics[extra_load_instruction->index];
+                extra_load_instruction->operand_flags = REIL_OPERAND_INPUT1|REIL_OPERAND_OUTPUT;
+                extra_load_instruction->address = REIL_ADDRESS(address);
+                extra_load_instruction->offset = 0;
+                extra_load_instruction->metadata = NULL;
+
+                extra_load_instruction->operands[0].type = REIL_OPERAND_REGISTER;
+                extra_load_instruction->operands[0].reg = instruction->op1.basereg;
+                extra_load_instruction->operands[0].size = (instruction->mode == MODE_32)?4:2;
         
-                extra_load_instruction.operands[1].type = REIL_OPERAND_EMPTY;
+                extra_load_instruction->operands[1].type = REIL_OPERAND_EMPTY;
                 
-                extra_load_instruction.operands[2].type = REIL_OPERAND_REGISTER;
+                extra_load_instruction->operands[2].type = REIL_OPERAND_REGISTER;
                 /* TODO: Calculate next free reil register */
-                extra_load_instruction.operands[2].reg = 0x100;
-                extra_load_instruction.operands[2].size = extra_load_instruction.operands[0].size;
-                reil_instructions * previos_translated_instructions = translated_instructions;
-                translated_instructions = malloc(sizeof(reil_instructions) + 2 * sizeof(reil_instruction));
-                if (!translated_instructions)
-                {
-                    fprintf(stderr, "Failed to allocate memory for translated instructions!");
-                    exit(EXIT_FAILURE);
-                }
-                translated_instructions->size = 2;
+                extra_load_instruction->operands[2].reg = 0x100;
+                extra_load_instruction->operands[2].size = extra_load_instruction->operands[0].size;
 
-                memcpy(&translated_instructions->instruction[0], &extra_load_instruction, sizeof(reil_instruction));
-                memcpy(&translated_instructions->instruction[1], &previos_translated_instructions->instruction[0], sizeof(reil_instruction));
-
-                translated_instructions->instruction[1].offset += 1;
-
-                free(previos_translated_instructions);
+                memcpy(&translated_instruction->operands[0], &extra_load_instruction->operands[2],
+                        sizeof(reil_operand));
+                translated_instruction->offset += 1;
             }
             /*
             // Index register
@@ -149,27 +140,60 @@ reil_instructions * reil_translate(unsigned long address, INSTRUCTION * instruct
             }
             */
         }
+        /* The second operand of ADD can be a register, a memory location or an intermediate. */
         if ( translate_operand(instruction, &instruction->op2, &translated_instruction->operands[1]) )
         {
         }
+        
+        /* The third operand is equal to the first. */
         if ( translate_operand(instruction, &instruction->op1, &translated_instruction->operands[2]) )
         {
+            if (instruction->op1.basereg != REG_NOP && instruction->op1.indexreg == REG_NOP) 
+            {
+                memcpy(&translated_instruction->operands[2], &translated_instruction->operands[0],
+                        sizeof(reil_operand));
+                
+                size++;
+                reil_instruction * extra_store_instruction = &instruction_buffer[lowest_index+2];
+                extra_store_instruction->group = REIL_DATATRANSFER_INSTRUCTION;
+                extra_store_instruction->index= REIL_STM;
+                extra_store_instruction->mnemonic = reil_mnemonics[extra_store_instruction->index];
+                extra_store_instruction->operand_flags = REIL_OPERAND_INPUT1|REIL_OPERAND_OUTPUT;
+                extra_store_instruction->address = REIL_ADDRESS(address);
+                extra_store_instruction->offset = translated_instruction->offset + 1;
+                extra_store_instruction->metadata = NULL;
+
+                extra_store_instruction->operands[0].type = REIL_OPERAND_REGISTER;
+                extra_store_instruction->operands[0].reg = instruction->op1.basereg;
+                extra_store_instruction->operands[0].size = (instruction->mode == MODE_32)?4:2;
+        
+                extra_store_instruction->operands[1].type = REIL_OPERAND_EMPTY;
+                
+                extra_store_instruction->operands[2].type = REIL_OPERAND_REGISTER;
+                memcpy(&extra_store_instruction->operands[2], &translated_instruction->operands[2],
+                        sizeof(reil_operand));
+            }
         }
         
-        if ( translated_instruction->operands[0].type == REIL_OPERAND_EMPTY 
-          || translated_instruction->operands[1].type == REIL_OPERAND_EMPTY
-          || translated_instruction->operands[2].type == REIL_OPERAND_EMPTY )
+        translated_instructions = malloc(sizeof(reil_instructions) + size * sizeof(reil_instruction));
+        if (!translated_instructions)
         {
-            translated_instruction->group = REIL_OTHER_INSTRUCTION;
-            translated_instruction->index = REIL_UNKN;
-            translated_instruction->mnemonic = reil_mnemonics[translated_instruction->index];
-            translated_instruction->operand_flags = REIL_OPERAND_NONE;
+            fprintf(stderr, "Failed to allocate memory for translated instructions!");
+            exit(EXIT_FAILURE);
         }
+        translated_instructions->size = size;
+
+        memcpy(translated_instructions->instruction, &instruction_buffer[lowest_index], size*sizeof(reil_instruction));
 
     }
     else
     {
         translated_instructions = malloc(sizeof(reil_instructions) + sizeof(reil_instruction));
+        if (!translated_instructions)
+        {
+            fprintf(stderr, "Failed to allocate memory for translated instructions!");
+            exit(EXIT_FAILURE);
+        }
         reil_instruction * translated_instruction = &translated_instructions->instruction[0];
         translated_instruction->group = REIL_OTHER_INSTRUCTION;
         translated_instruction->index = REIL_UNKN;
