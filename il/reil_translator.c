@@ -64,9 +64,13 @@ int main(int argc, char** argv)
 
                 char instruction_string[256];
                 reil_get_string(instruction, instruction_string, sizeof(instruction_string));
-                printf("0x%08x %-30s // %s\n", instruction->address + instruction->offset,
+                printf("0x%08x %-40s // %s\n", instruction->address + instruction->offset,
                         instruction_string, x86_instruction_string);
             }
+
+            for ( i = 0; i < 79; i++)
+                printf("=");
+            printf("\n");
 
             free(instructions);
         }
