@@ -78,19 +78,7 @@ void reil_get_string(reil_instruction * instruction, char * string, size_t size)
         }
         else if (operand->type == REIL_OPERAND_INTEGER) 
         {
-            if ( operand->size == 1)
-                bytes_written = snprintf(string+total_bytes_written, bytes_left, " 0x%02x/%u", operand->integer, operand->size);
-            else if ( operand->size == 2)
-                bytes_written = snprintf(string+total_bytes_written, bytes_left, " 0x%04x/%u", operand->integer, operand->size);
-            else if ( operand->size == 4)
-                bytes_written = snprintf(string+total_bytes_written, bytes_left, " 0x%08x/%u", operand->integer, operand->size);
-            else if ( operand->size == 8)
-                bytes_written = snprintf(string+total_bytes_written, bytes_left, " 0x%016x/%u", operand->integer, operand->size);
-            else
-            {
-                fprintf(stderr, "Invalid operand size!\n");
-                exit(EXIT_FAILURE);
-            }
+                bytes_written = snprintf(string+total_bytes_written, bytes_left, " 0x%x/%u", operand->integer, operand->size);
         }
         else if (operand->type == REIL_OPERAND_REGISTER) 
         {
