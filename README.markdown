@@ -3,7 +3,7 @@ The Binary Introspection Toolkit
 
 Introduction
 ------------
-The goal of the binary introspection toolkit (bil) is to create a collection of **static** & **dynamic** analysis techniques to analyze *(malicious)* binaries.
+The goal of the binary introspection toolkit (BIT) is to create a collection of **static** & **dynamic** analysis techniques to analyze *(malicious)* binaries.
 
 Roadmap
 -------
