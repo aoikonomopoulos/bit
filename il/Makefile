@@ -5,12 +5,16 @@ sources=reil_translator.c libdasm.c reil.c reil_x86_translator.c
 objects=$(sources:.c=.o)
 program=reil_translator
 
-all: $(program)
+all: $(program) tests
 
 include $(sources:.c=.d)
 
 $(program): $(objects)
 	$(CC) $(CFLAGS) $(objects) -o $(program)
+
+.PHONY : tests
+tests:
+	$(MAKE) -C tests
 
 # Generate dependencies, excluding system headers.
 %.d: %.c
@@ -23,3 +27,4 @@ $(program): $(objects)
 .PHONY : clean
 clean:
 	rm -f $(objects) $(program)
+	$(MAKE) -C tests clean

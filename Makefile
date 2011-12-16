@@ -1,5 +1,6 @@
 all:
-	cd il && make && cd ..
+	$(MAKE) -C il
 
+.PHONY : clean
 clean:
-	cd il && make clean && cd ..
+	$(MAKE) -C il clean
