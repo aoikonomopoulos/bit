@@ -80,10 +80,13 @@ typedef enum _reil_operand_type
     REIL_OPERAND_SUBADDRESS,
 } reil_operand_type;
 
-#define REIL_OPERAND_NONE   0x0
-#define REIL_OPERAND_INPUT1 0x1
-#define REIL_OPERAND_INPUT2 0x2
-#define REIL_OPERAND_OUTPUT 0x4
+typedef enum _reil_operand_index
+{
+    REIL_OPERAND_NONE =  0x0,
+    REIL_OPERAND_INPUT1 = 0x1,
+    REIL_OPERAND_INPUT2 = 0x2,
+    REIL_OPERAND_OUTPUT = 0x4
+} reil_operand_index;
 
 typedef struct _reil_operand
 {
