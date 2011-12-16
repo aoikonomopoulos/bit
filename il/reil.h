@@ -119,20 +119,17 @@ typedef struct _reil_instruction
     reil_instruction_group group;
     reil_instruction_index index;
     const char * mnemonic;
+    unsigned char operand_flags;
     /* Address of corresponding arch depended instruction */
     unsigned int address;
     /* Offset from address, since an arch depended instruction can expand
      * to multiple reil instructions.
      * */
     unsigned char offset;
-    unsigned char operand_flags;
     reil_operand operands[REIL_MAX_OPERANDS];
     reil_instruction_metadata * metadata;
 
 } reil_instruction;
-
-
-extern const char * reil_mnemonics[];
 
 void reil_get_string(reil_instruction * instruction, char * string, size_t size);
 

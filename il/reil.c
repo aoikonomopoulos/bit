@@ -30,28 +30,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <string.h>
 #include "reil.h"
 
-/* Index with reil instruction index */
-const char * reil_mnemonics[] =
-{
-    "ADD",
-    "SUB",
-    "MUL",
-    "DIV",
-    "MOD",
-    "BSH",
-    "AND",
-    "OR",
-    "XOR",
-    "LDM",
-    "STM",
-    "STR",
-    "BISZ",
-    "JCC",
-    "UNDEF",
-    "UNKN",
-    "NOP"
-};
-
 void reil_get_string(reil_instruction * instruction, char * string, size_t size)
 {
     size_t i, bytes_left = size;
