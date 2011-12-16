@@ -140,26 +140,6 @@ reil_instructions * reil_translate(unsigned long address, INSTRUCTION * instruct
                     multiply_instruction->operands[2].size = 2 * MAX(multiply_instruction->operands[0].size,
                             multiply_instruction->operands[1].size);
 
-                    reil_instruction * mod_instruction = &instruction_buffer[size++];
-                    mod_instruction->group = REIL_ARITHMETIC_INSTRUCTION;
-                    mod_instruction->index = REIL_MOD;
-                    mod_instruction->mnemonic = reil_mnemonics[mod_instruction->index];
-                    mod_instruction->operand_flags = REIL_OPERAND_INPUT1|REIL_OPERAND_INPUT2|REIL_OPERAND_OUTPUT;
-                    mod_instruction->address = REIL_ADDRESS(address);
-                    mod_instruction->offset = max_offset++;
-                    mod_instruction->metadata = NULL;
-
-                    mod_instruction->operands[0].type = REIL_OPERAND_REGISTER;
-                    mod_instruction->operands[0].reg = next_free_register - 1;
-                    mod_instruction->operands[0].size = multiply_instruction->operands[2].size;
-
-                    mod_instruction->operands[1].type = REIL_OPERAND_INTEGER;
-                    mod_instruction->operands[1].integer = multiply_instruction->operands[0].size;
-                    mod_instruction->operands[1].size = multiply_instruction->operands[0].size;
-
-                    mod_instruction->operands[2].type = REIL_OPERAND_REGISTER;
-                    mod_instruction->operands[2].reg = next_free_register++;
-                    mod_instruction->operands[2].size = mod_instruction->operands[1].size;
                 }
 
                 if (instruction->op1.basereg != REG_NOP)
@@ -187,26 +167,6 @@ reil_instructions * reil_translate(unsigned long address, INSTRUCTION * instruct
                     add_instruction->operands[2].size = 2 * MAX(add_instruction->operands[0].size,
                             add_instruction->operands[1].size);
 
-                    reil_instruction * mod_instruction = &instruction_buffer[size++];
-                    mod_instruction->group = REIL_ARITHMETIC_INSTRUCTION;
-                    mod_instruction->index = REIL_MOD;
-                    mod_instruction->mnemonic = reil_mnemonics[mod_instruction->index];
-                    mod_instruction->operand_flags = REIL_OPERAND_INPUT1|REIL_OPERAND_INPUT2|REIL_OPERAND_OUTPUT;
-                    mod_instruction->address = REIL_ADDRESS(address);
-                    mod_instruction->offset = max_offset++;
-                    mod_instruction->metadata = NULL;
-
-                    mod_instruction->operands[0].type = REIL_OPERAND_REGISTER;
-                    mod_instruction->operands[0].reg = next_free_register - 1;
-                    mod_instruction->operands[0].size = add_instruction->operands[2].size;
-
-                    mod_instruction->operands[1].type = REIL_OPERAND_INTEGER;
-                    mod_instruction->operands[1].integer = add_instruction->operands[0].size;
-                    mod_instruction->operands[1].size = add_instruction->operands[0].size;
-
-                    mod_instruction->operands[2].type = REIL_OPERAND_REGISTER;
-                    mod_instruction->operands[2].reg = next_free_register++;
-                    mod_instruction->operands[2].size = mod_instruction->operands[1].size;
                 }
                 
                 reil_instruction * load_instruction = &instruction_buffer[size++];
@@ -271,28 +231,6 @@ reil_instructions * reil_translate(unsigned long address, INSTRUCTION * instruct
             translated_instruction->operands[2].reg = next_free_register++;
             translated_instruction->operands[2].size = 2*get_operand_size(instruction, &instruction->op1);
                 
-            reil_instruction * mod_instruction = &instruction_buffer[size++];
-            mod_instruction->group = REIL_ARITHMETIC_INSTRUCTION;
-            mod_instruction->index = REIL_MOD;
-            mod_instruction->mnemonic = reil_mnemonics[mod_instruction->index];
-            mod_instruction->operand_flags = REIL_OPERAND_INPUT1|REIL_OPERAND_INPUT2|REIL_OPERAND_OUTPUT;
-            mod_instruction->address = REIL_ADDRESS(address);
-            mod_instruction->offset = ++max_offset;
-            mod_instruction->metadata = NULL;
-
-            mod_instruction->operands[0].type = REIL_OPERAND_REGISTER;
-            mod_instruction->operands[0].reg = next_free_register - 1;
-            /* TODO: Get real size of last free register. */
-            mod_instruction->operands[0].size = translated_instruction->operands[2].size;
-
-            mod_instruction->operands[1].type = REIL_OPERAND_INTEGER;
-            mod_instruction->operands[1].integer = 4;
-            mod_instruction->operands[1].size = 4;
-
-            mod_instruction->operands[2].type = REIL_OPERAND_REGISTER;
-            mod_instruction->operands[2].reg = next_free_register++;
-            mod_instruction->operands[2].size = translated_instruction->operands[0].size;
-                
             reil_instruction * store_instruction = &instruction_buffer[size++];
             store_instruction->group = REIL_DATATRANSFER_INSTRUCTION;
             store_instruction->index= REIL_STR;
@@ -320,31 +258,6 @@ reil_instructions * reil_translate(unsigned long address, INSTRUCTION * instruct
             translated_instruction->operands[2].size = 2*get_operand_size(instruction, &instruction->op1);
             if (instruction->op1.basereg != REG_NOP && instruction->op1.indexreg == REG_NOP) 
             {
-                if ( translated_instruction->operands[0].size == 4)
-                {
-                    reil_instruction * mod_instruction = &instruction_buffer[size++];
-                    mod_instruction->group = REIL_ARITHMETIC_INSTRUCTION;
-                    mod_instruction->index = REIL_MOD;
-                    mod_instruction->mnemonic = reil_mnemonics[mod_instruction->index];
-                    mod_instruction->operand_flags = REIL_OPERAND_INPUT1|REIL_OPERAND_INPUT2|REIL_OPERAND_OUTPUT;
-                    mod_instruction->address = REIL_ADDRESS(address);
-                    mod_instruction->offset = ++max_offset;
-                    mod_instruction->metadata = NULL;
-                
-                    mod_instruction->operands[0].type = REIL_OPERAND_REGISTER;
-                    mod_instruction->operands[0].reg = next_free_register - 1;
-                    /* TODO: Get real size of last free register. */
-                    mod_instruction->operands[0].size = translated_instruction->operands[2].size;
-
-                    mod_instruction->operands[1].type = REIL_OPERAND_INTEGER;
-                    mod_instruction->operands[1].integer = 4;
-                    mod_instruction->operands[1].size = 4;
-
-                    mod_instruction->operands[2].type = REIL_OPERAND_REGISTER;
-                    mod_instruction->operands[2].reg = next_free_register++;
-                    mod_instruction->operands[2].size = mod_instruction->operands[1].size;
-                }
-
                 reil_instruction * store_instruction = &instruction_buffer[size++];
                 store_instruction->group = REIL_DATATRANSFER_INSTRUCTION;
                 store_instruction->index= REIL_STM;
