@@ -69,75 +69,84 @@ size_t get_operand_size(INSTRUCTION * instruction, OPERAND * operand);
 void init_translation_context(translation_context * context, unsigned long address);
 void translate_operand(INSTRUCTION * x86instruction, translation_context * context, reil_instruction * instruction, reil_operand_index operand_index);
 
-reil_instructions * reil_translate(unsigned long address, INSTRUCTION * instruction)
+reil_instructions * reil_translate(unsigned long address, INSTRUCTION * x86instruction)
 {
     translation_context context;
     init_translation_context(&context, address);
 
-    reil_instructions * translated_instructions = NULL;
+    reil_instructions * instructions = NULL;
+    reil_instruction * instruction = &context.instruction_buffer[context.num_of_instructions++];
 
-    if ( instruction->type == INSTRUCTION_TYPE_ADD )
+    switch (x86instruction->type)
     {
-        reil_instruction * translated_instruction = &context.instruction_buffer[context.num_of_instructions++];
-        memcpy(translated_instruction, &reil_instruction_table[REIL_ADD], sizeof(reil_instruction));
-        translated_instruction->address = REIL_ADDRESS(address);
-
-        translate_operand(instruction, &context, translated_instruction, REIL_OPERAND_INPUT1);
-        translate_operand(instruction, &context, translated_instruction, REIL_OPERAND_INPUT2);
-        translated_instruction->offset = context.last_offset++;
-        translate_operand(instruction, &context, translated_instruction, REIL_OPERAND_OUTPUT);
-
-        translated_instructions = malloc(sizeof(reil_instructions) + context.num_of_instructions * sizeof(reil_instruction));
-        if (!translated_instructions)
-        {
-            fprintf(stderr, "Failed to allocate memory for translated instructions!");
-            exit(EXIT_FAILURE);
-        }
-        translated_instructions->size = context.num_of_instructions;
-
-        size_t i, j;
-        /* Prepare sort buffer for sorting */
-        for ( i = 0; i < context.num_of_instructions; i++)
-        {
-            context.instruction_sort_buffer[i] = &context.instruction_buffer[i];
-        }
-        
-        /* Bubblesort the sort buffer. */
-        for ( i = 0; i < context.num_of_instructions - 1; i++)
-        {
-            for ( j = i+1; j < context.num_of_instructions; j++ )
+        case INSTRUCTION_TYPE_ADD:
             {
-                if ( context.instruction_sort_buffer[i]->offset > context.instruction_sort_buffer[j]->offset)
-                {
-                    reil_instruction * tmp = context.instruction_sort_buffer[i];
-                    context.instruction_sort_buffer[i] = context.instruction_sort_buffer[j];
-                    context.instruction_sort_buffer[j] = tmp;
-                }
+                memcpy(instruction, &reil_instruction_table[REIL_ADD], sizeof(reil_instruction));
+            }
+            break;
+        case INSTRUCTION_TYPE_SUB:
+            {
+                memcpy(instruction, &reil_instruction_table[REIL_SUB], sizeof(reil_instruction));
+            }
+            break;
+        default:
+            {
+                reil_instruction * unknown_instruction = &context.instruction_buffer[context.num_of_instructions++];
+                memcpy(unknown_instruction, &reil_instruction_table[REIL_UNKN], sizeof(reil_instruction));
+
+                unknown_instruction->address = address;
+            }
+            break;
+    }
+    
+    instruction->address = REIL_ADDRESS(address);
+                
+    if ( instruction->operand_flags & REIL_OPERAND_INPUT1 )
+        translate_operand(x86instruction, &context, instruction, REIL_OPERAND_INPUT1);
+    if ( instruction->operand_flags & REIL_OPERAND_INPUT2 )
+        translate_operand(x86instruction, &context, instruction, REIL_OPERAND_INPUT2);
+
+    instruction->offset = context.last_offset++;
+
+    if ( instruction->operand_flags & REIL_OPERAND_OUTPUT )
+        translate_operand(x86instruction, &context, instruction, REIL_OPERAND_OUTPUT);
+        
+    instructions = malloc(sizeof(reil_instructions) + context.num_of_instructions * sizeof(reil_instruction));
+    if (!instructions)
+    {
+        fprintf(stderr, "Failed to allocate memory for translated instructions!");
+        exit(EXIT_FAILURE);
+    }
+    instructions->size = context.num_of_instructions;
+
+    size_t i, j;
+    /* Prepare sort buffer for sorting */
+    for ( i = 0; i < context.num_of_instructions; i++)
+    {
+        context.instruction_sort_buffer[i] = &context.instruction_buffer[i];
+    }
+
+    /* Bubblesort the sort buffer. */
+    for ( i = 0; i < context.num_of_instructions - 1; i++)
+    {
+        for ( j = i+1; j < context.num_of_instructions; j++ )
+        {
+            if ( context.instruction_sort_buffer[i]->offset > context.instruction_sort_buffer[j]->offset)
+            {
+                reil_instruction * tmp = context.instruction_sort_buffer[i];
+                context.instruction_sort_buffer[i] = context.instruction_sort_buffer[j];
+                context.instruction_sort_buffer[j] = tmp;
             }
         }
-        
-        /* Copy the sorted instructions */
-        for ( i = 0; i < context.num_of_instructions; i++)
-        {
-            memcpy(&translated_instructions->instruction[i], context.instruction_sort_buffer[i], sizeof(reil_instruction));
-        }
-
     }
-    else
+
+    /* Copy the sorted instructions */
+    for ( i = 0; i < context.num_of_instructions; i++)
     {
-        translated_instructions = malloc(sizeof(reil_instructions) + sizeof(reil_instruction));
-        if (!translated_instructions)
-        {
-            fprintf(stderr, "Failed to allocate memory for translated instructions!");
-            exit(EXIT_FAILURE);
-        }
-        reil_instruction * unknown_instruction = &translated_instructions->instruction[0];
-        memcpy(unknown_instruction, &reil_instruction_table[REIL_UNKN], sizeof(reil_instruction));
-
-        unknown_instruction->address = address;
+        memcpy(&instructions->instruction[i], context.instruction_sort_buffer[i], sizeof(reil_instruction));
     }
 
-    return translated_instructions;
+    return instructions;
 }
 
 size_t get_operand_size(INSTRUCTION * instruction, OPERAND * operand)
