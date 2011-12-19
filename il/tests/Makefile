@@ -1,9 +1,15 @@
 # Tests makefile
-all: add
+
+tests = add sub
+
+all: $(tests)
 
 add: add.asm
-	nasm -o add -f bin add.asm
+	nasm -o $@ -f bin $<
+
+sub: sub.asm
+	nasm -o $@ -f bin $<
 
 .PHONY : clean
 clean:
-	rm -f add
+	rm -f $(tests)
