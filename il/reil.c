@@ -56,11 +56,32 @@ void reil_get_string(reil_instruction * instruction, char * string, size_t size)
         }
         else if (operand->type == REIL_OPERAND_INTEGER) 
         {
-                bytes_written = snprintf(string+total_bytes_written, bytes_left, " 0x%x/%u", operand->integer, operand->size);
+                bytes_written = snprintf(string+total_bytes_written, bytes_left, " 0x%x", operand->integer);
         }
         else if (operand->type == REIL_OPERAND_REGISTER) 
         {
-            bytes_written = snprintf(string+total_bytes_written, bytes_left, " T%u/%u", operand->reg, operand->size);
+            const char * size_prefix = NULL;
+            if ( operand->size == 1 )
+            {
+                size_prefix = "byte";
+            }
+            else if ( operand->size == 2 )
+            {
+                size_prefix = "word";
+            }
+            else if ( operand->size == 4 )
+            {
+                size_prefix = "dword";
+            }
+            else if ( operand->size == 8 )
+            {
+                size_prefix = "qword";
+            }
+            else
+            {
+                size_prefix = "???";
+            }
+            bytes_written = snprintf(string+total_bytes_written, bytes_left, " %s T%u", size_prefix, operand->reg);
         }
         else if (operand->type == REIL_OPERAND_SUBADDRESS) 
         {
