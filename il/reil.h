@@ -50,7 +50,8 @@ typedef enum _reil_instruction_index
     REIL_MUL,
     REIL_DIV,
     REIL_MOD,
-    REIL_BSH,
+    REIL_LSH,
+    REIL_RSH,
     /* Bitwise instructions */
     REIL_AND,
     REIL_OR,
