@@ -75,19 +75,24 @@ typedef int reil_subaddress;
 
 typedef enum _reil_operand_type
 {
-    REIL_OPERAND_EMPTY,
-    REIL_OPERAND_INTEGER,
-    REIL_OPERAND_REGISTER,
-    REIL_OPERAND_SUBADDRESS,
+    REIL_OPERAND_TYPE_EMPTY,
+    REIL_OPERAND_TYPE_INTEGER,
+    REIL_OPERAND_TYPE_REGISTER,
+    REIL_OPERAND_TYPE_SUBADDRESS,
 } reil_operand_type;
 
-typedef enum _reil_operand_index
+typedef enum _reil_operand_flags
 {
-    REIL_OPERAND_NONE =  0x0,
-    REIL_OPERAND_INPUT1 = 0x1,
-    REIL_OPERAND_INPUT2 = 0x2,
-    REIL_OPERAND_OUTPUT = 0x4
-} reil_operand_index;
+    REIL_OPERAND_FLAG_NONE =  0x0,
+    REIL_OPERAND_FLAG_INPUT1 = 0x1,
+    REIL_OPERAND_FLAG_INPUT2 = 0x2,
+    REIL_OPERAND_FLAG_OUTPUT = 0x4
+} reil_operand_flags;
+
+typedef enum _reil_instruction_flags
+{
+    REIL_INSTRUCTION_FLAG_NONE = 0x0
+} reil_instruction_flags;
 
 typedef struct _reil_operand
 {
@@ -97,7 +102,6 @@ typedef struct _reil_operand
         reil_integer integer;
         reil_register reg;
         reil_subaddress subaddress;
-
     };
     /* Size in bytes (e.g. 1, 2, and 4 bytes ); */
     unsigned char size;
@@ -123,7 +127,7 @@ typedef struct _reil_instruction
     reil_instruction_group group;
     reil_instruction_index index;
     const char * mnemonic;
-    unsigned char operand_flags;
+    unsigned char instruction_flags;
     /* Address of corresponding arch depended instruction */
     unsigned int address;
     /* Offset from address, since an arch depended instruction can expand
@@ -131,6 +135,7 @@ typedef struct _reil_instruction
      * */
     unsigned char offset;
     reil_operand operands[REIL_MAX_OPERANDS];
+    unsigned char operand_flags;
     reil_instruction_metadata * metadata;
 
 } reil_instruction;

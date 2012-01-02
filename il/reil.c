@@ -50,15 +50,15 @@ void reil_get_string(reil_instruction * instruction, char * string, size_t size)
     for (i = 0; i < REIL_MAX_OPERANDS; i++)
     {
         reil_operand * operand = &instruction->operands[i];
-        if (operand->type == REIL_OPERAND_EMPTY) 
+        if (operand->type == REIL_OPERAND_TYPE_EMPTY) 
         {
             bytes_written = snprintf(string+total_bytes_written, bytes_left," ");
         }
-        else if (operand->type == REIL_OPERAND_INTEGER) 
+        else if (operand->type == REIL_OPERAND_TYPE_INTEGER) 
         {
                 bytes_written = snprintf(string+total_bytes_written, bytes_left, " 0x%x", operand->integer);
         }
-        else if (operand->type == REIL_OPERAND_REGISTER) 
+        else if (operand->type == REIL_OPERAND_TYPE_REGISTER) 
         {
             const char * size_prefix = NULL;
             if ( operand->size == 1 )
@@ -83,7 +83,7 @@ void reil_get_string(reil_instruction * instruction, char * string, size_t size)
             }
             bytes_written = snprintf(string+total_bytes_written, bytes_left, " %s T%u", size_prefix, operand->reg);
         }
-        else if (operand->type == REIL_OPERAND_SUBADDRESS) 
+        else if (operand->type == REIL_OPERAND_TYPE_SUBADDRESS) 
         {
             bytes_written = snprintf(string+total_bytes_written, bytes_left, " loc_%xh", operand->subaddress);
         }
