@@ -56,7 +56,7 @@ static __inline__ enum Mode MODE_CHECK_OPERAND(enum Mode mode, int flags) {
 
 typedef struct _translation_context
 {
-    /* Buffer used to store intermediate result during the translation process. */
+    /* Buffer used to store intermediate result of the translation process. */
     reil_instruction instruction_buffer[REIL_MAX_INSTRUCTIONS];
     reil_instruction * instruction_sort_buffer[REIL_MAX_INSTRUCTIONS];
     size_t num_of_instructions;
@@ -65,7 +65,7 @@ typedef struct _translation_context
     unsigned long address;
 } translation_context;
 
-/* This array holds the X86 instructions that map easily to REIL instructions */
+/* This array hold the X86 instructions that map easily to REIL instructions */
 enum Instruction simple_instructions[] =
 {
     INSTRUCTION_TYPE_ADD,
@@ -81,7 +81,7 @@ enum Instruction simple_instructions[] =
 
 static size_t get_operand_size(INSTRUCTION * x86instruction, OPERAND * x86operand);
 static void init_translation_context(translation_context * context, unsigned long address);
-static void translate_operand(INSTRUCTION * x86instruction, translation_context * context, reil_instruction * instruction, reil_operand_index operand_index);
+static void translate_operand(INSTRUCTION * x86instruction, translation_context * context, reil_instruction * instruction, reil_operand_flags operand_index);
 static int is_simple(enum Instruction x86instruction);
 
 static void gen_unknown(translation_context * context);
@@ -97,10 +97,10 @@ reil_instructions * reil_translate(unsigned long address, INSTRUCTION * x86instr
     init_translation_context(&context, address);
 
     reil_instructions * instructions = NULL;
-    reil_instruction * instruction = &context.instruction_buffer[context.num_of_instructions++];
 
     if (is_simple(x86instruction->type))
     {
+        reil_instruction * instruction = &context.instruction_buffer[context.num_of_instructions++];
         switch (x86instruction->type)
         {
             case INSTRUCTION_TYPE_ADD:
@@ -158,10 +158,10 @@ reil_instructions * reil_translate(unsigned long address, INSTRUCTION * x86instr
                 {
                     /* Allocate space on the stack */
                     memcpy(instruction, &reil_instruction_table[REIL_SUB], sizeof(reil_instruction_table[0]));
-                    instruction->operands[0].type = REIL_OPERAND_REGISTER;
+                    instruction->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
                     instruction->operands[0].reg = REG_ESP;
                     instruction->operands[0].size = 0x4;
-                    instruction->operands[2].type = REIL_OPERAND_INTEGER;
+                    instruction->operands[2].type = REIL_OPERAND_TYPE_INTEGER;
                     instruction->operands[2].integer = get_operand_size(x86instruction, &x86instruction->op1);
                     instruction->operands[2].size = get_operand_size(x86instruction, &x86instruction->op1);
 
@@ -170,9 +170,9 @@ reil_instructions * reil_translate(unsigned long address, INSTRUCTION * x86instr
 
                     /* Store operand on the stack */
                     memcpy(instruction, &reil_instruction_table[REIL_STM], sizeof(reil_instruction_table[0]));
-                    instruction->operands[0].type = REIL_OPERAND_REGISTER;
+                    instruction->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
                     instruction->operands[0].reg = REG_ESP;
-                    instruction->operands[2].type = REIL_OPERAND_REGISTER;
+                    instruction->operands[2].type = REIL_OPERAND_TYPE_REGISTER;
                     instruction->operands[2].reg = context.next_free_register - 1;
                     instruction->operands[2].size = get_operand_size(x86instruction, &x86instruction->op1);
                 }
@@ -186,38 +186,38 @@ reil_instructions * reil_translate(unsigned long address, INSTRUCTION * x86instr
 
         instruction->address = REIL_ADDRESS(address);
 
-        if ( instruction->operand_flags & REIL_OPERAND_INPUT1 )
-            translate_operand(x86instruction, &context, instruction, REIL_OPERAND_INPUT1);
-        if ( instruction->operand_flags & REIL_OPERAND_INPUT2 )
-            translate_operand(x86instruction, &context, instruction, REIL_OPERAND_INPUT2);
+        if ( instruction->operand_flags & REIL_OPERAND_FLAG_INPUT1 )
+            translate_operand(x86instruction, &context, instruction, REIL_OPERAND_FLAG_INPUT1);
+        if ( instruction->operand_flags & REIL_OPERAND_FLAG_INPUT2 )
+            translate_operand(x86instruction, &context, instruction, REIL_OPERAND_FLAG_INPUT2);
 
         instruction->offset = context.last_offset++;
 
-        if ( instruction->operand_flags & REIL_OPERAND_OUTPUT )
-            translate_operand(x86instruction, &context, instruction, REIL_OPERAND_OUTPUT);
+        if ( instruction->operand_flags & REIL_OPERAND_FLAG_OUTPUT )
+            translate_operand(x86instruction, &context, instruction, REIL_OPERAND_FLAG_OUTPUT);
     }
     else
     {
         switch (x86instruction->type)
         {
+#if 0
             case INSTRUCTION_TYPE_MOV:
                 {
-                    memcpy(instruction, &reil_instruction_table[REIL_NOP], sizeof(reil_instruction_table[0]));
-                    translate_operand(x86instruction, &context, instruction, REIL_OPERAND_INPUT1);
-                    translate_operand(x86instruction, &context, instruction, REIL_OPERAND_INPUT2);
-                    translate_operand(x86instruction, &context, instruction, REIL_OPERAND_OUTPUT);
+                    reil_instruction dummy;
+                    dummy.operand_flags = REIL_OPERAND_FLAG_INPUT1|REIL_OPERAND_FLAG_OUTPUT;
+                    translate_operand(x86instruction, &context, &dummy, REIL_OPERAND_FLAG_INPUT1);
+                    translate_operand(x86instruction, &context, &dummy, REIL_OPERAND_FLAG_INPUT2);
+                    translate_operand(x86instruction, &context, &dummy, REIL_OPERAND_FLAG_OUTPUT);
     
                     reil_instruction * last_instruction= &context.instruction_buffer[context.num_of_instructions-1];
                     if (last_instruction->index == REIL_STR )
-                        last_instruction->operands[0].reg = instruction->operands[1].reg;
+                        last_instruction->operands[0].reg = dummy.operands[1].reg;
                     if (last_instruction->index == REIL_STM )
                         last_instruction->operands[2].reg = last_instruction->operands[0].reg - 1;
 
-                    /* Remove the NOP instruction */
-                    instruction->offset = REIL_MAX_INSTRUCTIONS - 1;
-                    //context.num_of_instructions--;
                 }
                 break;
+#endif
             default:
                 {
                     gen_unknown(&context);
@@ -294,22 +294,22 @@ void init_translation_context(translation_context * context, unsigned long addre
     context->address = address;
 }
 
-void translate_operand(INSTRUCTION * x86instruction, translation_context * context, reil_instruction * instruction, reil_operand_index operand_index)
+void translate_operand(INSTRUCTION * x86instruction, translation_context * context, reil_instruction * instruction, reil_operand_flags operand_index)
 {
     OPERAND * x86operand;
     reil_operand * operand;
 
-    if ( operand_index == REIL_OPERAND_INPUT1 )
+    if ( operand_index == REIL_OPERAND_FLAG_INPUT1 )
     {
         x86operand = &x86instruction->op1;
         operand = &instruction->operands[0];
     }
-    else if ( operand_index == REIL_OPERAND_INPUT2 )
+    else if ( operand_index == REIL_OPERAND_FLAG_INPUT2 )
     {
         x86operand = &x86instruction->op2;
         operand = &instruction->operands[1];
     }
-    else if ( operand_index == REIL_OPERAND_OUTPUT )
+    else if ( operand_index == REIL_OPERAND_FLAG_OUTPUT )
     {
         x86operand = &x86instruction->op1;
         operand = &instruction->operands[2];
@@ -322,15 +322,15 @@ void translate_operand(INSTRUCTION * x86instruction, translation_context * conte
 
     if ( x86operand->type == OPERAND_TYPE_REGISTER )
     {
-        if ( operand_index == REIL_OPERAND_INPUT1 || operand_index == REIL_OPERAND_INPUT2 )
+        if ( operand_index == REIL_OPERAND_FLAG_INPUT1 || operand_index == REIL_OPERAND_FLAG_INPUT2 )
         {
-            operand->type = REIL_OPERAND_REGISTER;
+            operand->type = REIL_OPERAND_TYPE_REGISTER;
             operand->reg = x86operand->reg;
             operand->size = get_operand_size(x86instruction, x86operand);
         }
-        else /* REIL_OPERAND_OUTPUT */
+        else /* REIL_OPERAND_FLAG_OUTPUT */
         {
-            operand->type = REIL_OPERAND_REGISTER;
+            operand->type = REIL_OPERAND_TYPE_REGISTER;
             operand->reg = context->next_free_register++;
             operand->size = 2*MAX(instruction->operands[0].size, instruction->operands[1].size);
 
@@ -343,7 +343,7 @@ void translate_operand(INSTRUCTION * x86instruction, translation_context * conte
     }
     else if ( x86operand->type == OPERAND_TYPE_IMMEDIATE )
     {
-        operand->type = REIL_OPERAND_INTEGER;
+        operand->type = REIL_OPERAND_TYPE_INTEGER;
         operand->integer = x86operand->immediate;
         operand->size = get_operand_size(x86instruction, x86operand);
     }
@@ -352,7 +352,7 @@ void translate_operand(INSTRUCTION * x86instruction, translation_context * conte
         /* Base register */
         if (x86operand->basereg != REG_NOP && x86operand->indexreg == REG_NOP) 
         {
-            if ( operand_index == REIL_OPERAND_INPUT1 || operand_index == REIL_OPERAND_INPUT2 )
+            if ( operand_index == REIL_OPERAND_FLAG_INPUT1 || operand_index == REIL_OPERAND_FLAG_INPUT2 )
             {
                 /* Displacement */
                 if ( x86operand->dispbytes )
@@ -378,11 +378,11 @@ void translate_operand(INSTRUCTION * x86instruction, translation_context * conte
                 gen_load_reg_reg(context, source, reg_size, destination, reg_size);
 
                 /* Update the operand to reflect the load. */
-                operand->type = REIL_OPERAND_REGISTER;
+                operand->type = REIL_OPERAND_TYPE_REGISTER;
                 operand->reg = destination;
                 operand->size = reg_size;
             }
-            else /* REIL_OPERAND_OUTPUT */
+            else /* REIL_OPERAND_FLAG_OUTPUT */
             {
                 /* The address to store the result should already be calculated
                  * and stored in the register minus 1 that is used as the first
@@ -405,7 +405,7 @@ void translate_operand(INSTRUCTION * x86instruction, translation_context * conte
 
                 gen_store_reg_reg(context, source, reg_size, destination, reg_size);
                 
-                operand->type = REIL_OPERAND_REGISTER;
+                operand->type = REIL_OPERAND_TYPE_REGISTER;
                 operand->reg = context->next_free_register++;
                 operand->size = 2*MAX(instruction->operands[0].size, instruction->operands[1].size);
             }
@@ -414,7 +414,7 @@ void translate_operand(INSTRUCTION * x86instruction, translation_context * conte
         /* Index register */
         if (x86operand->indexreg != REG_NOP) 
         {
-            if ( operand_index == REIL_OPERAND_INPUT1 || operand_index == REIL_OPERAND_INPUT2 )
+            if ( operand_index == REIL_OPERAND_FLAG_INPUT1 || operand_index == REIL_OPERAND_FLAG_INPUT2 )
             {
                 if (x86operand->scale)
                 {
@@ -447,15 +447,26 @@ void translate_operand(INSTRUCTION * x86instruction, translation_context * conte
                     gen_add_reg_integer(context, addend1, addends_size, addend2, addends_size);
                 }
 
-                reil_register source = context->next_free_register - 1, destination = context->next_free_register++;
-                size_t reg_size = (x86instruction->mode == MODE_32)?4:2;
-                gen_load_reg_reg(context, source, reg_size, destination, reg_size);
+                /* Only get the value of operand 1 if it is used as input and not just output (e.g. ADD [EAX], 0x1) */
+                if ( instruction->operand_flags & REIL_OPERAND_FLAG_INPUT2 )
+                {
+                    reil_register source = context->next_free_register - 1, destination = context->next_free_register++;
+                    size_t reg_size = (x86instruction->mode == MODE_32)?4:2;
+                    gen_load_reg_reg(context, source, reg_size, destination, reg_size);
 
-                operand->type = REIL_OPERAND_REGISTER;
-                operand->reg = destination;
-                operand->size = reg_size;
+                    operand->type = REIL_OPERAND_TYPE_REGISTER;
+                    operand->reg = destination;
+                    operand->size = reg_size;
+                }
+                else
+                {
+                    operand->type = REIL_OPERAND_TYPE_REGISTER;
+                    operand->reg = context->next_free_register - 1;
+                    /* TODO: Use actual size of last free register, now using size dependend on arch. */
+                    operand->size = (x86instruction->mode == MODE_32)?4:2;
+                }
             }
-            else /* REIL_OPERAND_OUTPUT */
+            else /* REIL_OPERAND_FLAG_OUTPUT */
             {
                 /* The address to store the result should already be calculated
                  * and stored in the register minus 1 that is used as the first
@@ -467,7 +478,7 @@ void translate_operand(INSTRUCTION * x86instruction, translation_context * conte
 
                 gen_store_reg_reg(context, source, reg_size, destination, reg_size);
                 
-                operand->type = REIL_OPERAND_REGISTER;
+                operand->type = REIL_OPERAND_TYPE_REGISTER;
                 operand->reg = context->next_free_register++;
                 operand->size = 2*MAX(instruction->operands[0].size, instruction->operands[1].size);
             }
@@ -491,11 +502,11 @@ static void gen_store_reg_reg(translation_context * context, reil_register reg1,
     store_instruction->address = REIL_ADDRESS(context->address);
     store_instruction->offset = context->last_offset++; 
 
-    store_instruction->operands[0].type = REIL_OPERAND_REGISTER;
+    store_instruction->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
     store_instruction->operands[0].reg = reg1;
     store_instruction->operands[0].size = reg1_size;
 
-    store_instruction->operands[2].type = REIL_OPERAND_REGISTER;
+    store_instruction->operands[2].type = REIL_OPERAND_TYPE_REGISTER;
     store_instruction->operands[2].reg = reg2;
     store_instruction->operands[2].size = reg2_size;
 }
@@ -508,15 +519,15 @@ static void gen_add_reg_integer(translation_context * context, reil_register reg
     add_instruction->address = REIL_ADDRESS(context->address);
     add_instruction->offset = context->last_offset++;
 
-    add_instruction->operands[0].type = REIL_OPERAND_REGISTER;
+    add_instruction->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
     add_instruction->operands[0].reg = reg;
     add_instruction->operands[0].size = reg_size;
 
-    add_instruction->operands[1].type = REIL_OPERAND_INTEGER;
+    add_instruction->operands[1].type = REIL_OPERAND_TYPE_INTEGER;
     add_instruction->operands[1].integer = integer;
     add_instruction->operands[1].size = integer_size;
 
-    add_instruction->operands[2].type = REIL_OPERAND_REGISTER;
+    add_instruction->operands[2].type = REIL_OPERAND_TYPE_REGISTER;
     add_instruction->operands[2].reg = context->next_free_register++;
     add_instruction->operands[2].size = 2 * MAX(add_instruction->operands[0].size, add_instruction->operands[1].size);
 }
@@ -529,11 +540,11 @@ static void gen_load_reg_reg(translation_context * context, reil_register reg1, 
     load_instruction->address = REIL_ADDRESS(context->address);
     load_instruction->offset = context->last_offset++;
 
-    load_instruction->operands[0].type = REIL_OPERAND_REGISTER;
+    load_instruction->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
     load_instruction->operands[0].reg = reg1;
     load_instruction->operands[0].size = reg1_size;
 
-    load_instruction->operands[2].type = REIL_OPERAND_REGISTER;
+    load_instruction->operands[2].type = REIL_OPERAND_TYPE_REGISTER;
     load_instruction->operands[2].reg = reg2;
     load_instruction->operands[2].size = reg2_size;
 }
@@ -546,15 +557,15 @@ static void gen_multiply_reg_integer(translation_context * context, reil_registe
     multiply_instruction->address = REIL_ADDRESS(context->address);
     multiply_instruction->offset = context->last_offset++;
 
-    multiply_instruction->operands[0].type = REIL_OPERAND_REGISTER;
+    multiply_instruction->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
     multiply_instruction->operands[0].reg = multiplicand;
     multiply_instruction->operands[0].size = multiplicand_size;
 
-    multiply_instruction->operands[1].type = REIL_OPERAND_INTEGER;
+    multiply_instruction->operands[1].type = REIL_OPERAND_TYPE_INTEGER;
     multiply_instruction->operands[1].integer = multiplier;
     multiply_instruction->operands[1].size = multiplier_size;
 
-    multiply_instruction->operands[2].type = REIL_OPERAND_REGISTER;
+    multiply_instruction->operands[2].type = REIL_OPERAND_TYPE_REGISTER;
     multiply_instruction->operands[2].reg = context->next_free_register++;
     multiply_instruction->operands[2].size = 2 * MAX(multiply_instruction->operands[0].size, multiply_instruction->operands[1].size);
 }
@@ -567,15 +578,15 @@ static void gen_add_reg_reg(translation_context * context, reil_register addend1
     add_instruction->address = REIL_ADDRESS(context->address);
     add_instruction->offset = context->last_offset++;
 
-    add_instruction->operands[0].type = REIL_OPERAND_REGISTER;
+    add_instruction->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
     add_instruction->operands[0].reg = addend1;
     add_instruction->operands[0].size = addend1_size;
 
-    add_instruction->operands[1].type = REIL_OPERAND_REGISTER;
+    add_instruction->operands[1].type = REIL_OPERAND_TYPE_REGISTER;
     add_instruction->operands[1].reg = addend2;
     add_instruction->operands[1].size = addend2_size;
 
-    add_instruction->operands[2].type = REIL_OPERAND_REGISTER;
+    add_instruction->operands[2].type = REIL_OPERAND_TYPE_REGISTER;
     add_instruction->operands[2].reg = context->next_free_register++;
     add_instruction->operands[2].size = 2 * MAX(add_instruction->operands[0].size, add_instruction->operands[1].size);
 }
