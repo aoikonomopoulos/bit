@@ -44,7 +44,7 @@ void reil_get_string(reil_instruction * instruction, char * string, size_t size)
     total_bytes_written += bytes_written;
 
     /* See if instruction has operands */
-    if ( !instruction->operand_flags )
+    if (!reil_num_operands(instruction))
         return;
     
     for (i = 0; i < REIL_MAX_OPERANDS; i++)
@@ -104,4 +104,18 @@ void reil_get_string(reil_instruction * instruction, char * string, size_t size)
             total_bytes_written += bytes_written;
         }
     }
+}
+
+unsigned int reil_num_operands(reil_instruction * instruction)
+{
+    unsigned int count = 0;
+
+    if ( instruction->flags & REIL_INSTRUCTION_FLAG_INPUT1 )
+        count++;
+    if ( instruction->flags & REIL_INSTRUCTION_FLAG_INPUT2 )
+        count++;
+    if ( instruction->flags & REIL_INSTRUCTION_FLAG_OUTPUT)
+        count++;
+
+    return count;
 }
