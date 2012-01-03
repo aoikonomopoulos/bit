@@ -328,7 +328,7 @@ void translate_operand(translation_context * context, reil_instruction * instruc
         if ( operand_index == REIL_OPERAND_FLAG_INPUT1 || operand_index == REIL_OPERAND_FLAG_INPUT2 )
         {
             operand->type = REIL_OPERAND_TYPE_REGISTER;
-            operand->reg = x86operand->reg;
+            operand->reg = get_operand_register(x86operand);
             operand->size = get_operand_size(context->x86instruction, x86operand);
         }
         else /* REIL_OPERAND_FLAG_OUTPUT */
@@ -347,32 +347,28 @@ void translate_operand(translation_context * context, reil_instruction * instruc
     else if ( x86operand->type == OPERAND_TYPE_IMMEDIATE )
     {
         operand->type = REIL_OPERAND_TYPE_INTEGER;
-        operand->integer = x86operand->immediate;
+        get_operand_immediate(x86operand, (unsigned int *)&operand->integer);
         operand->size = get_operand_size(context->x86instruction, x86operand);
     }
     else /* OPERAND_TYPE_MEMORY */
     {
         /* Base register */
-        if (x86operand->basereg != REG_NOP && x86operand->indexreg == REG_NOP) 
+        if (get_operand_basereg(x86operand) != REG_NOP && get_operand_indexreg(x86operand) == REG_NOP) 
         {
             if ( operand_index == REIL_OPERAND_FLAG_INPUT1 || operand_index == REIL_OPERAND_FLAG_INPUT2 )
             {
                 /* Displacement */
-                if ( x86operand->dispbytes )
+                unsigned int displacement;
+                reil_register source, destination;
+                if ( get_operand_displacement(x86operand, &displacement ) )
                 {
                     size_t operand_size = (context->x86instruction->mode == MODE_32)?4:2;
-                    gen_add_reg_integer(context, x86operand->basereg, operand_size, x86operand->displacement, operand_size);
-                }
-
-                reil_register source, destination;
-                
-                if ( !x86operand->dispbytes )
-                {
-                    source = x86operand->basereg;
+                    gen_add_reg_integer(context, get_operand_basereg(x86operand), operand_size, displacement, operand_size);
+                    source = context->next_free_register - 1;
                 }
                 else
                 {
-                    source = context->next_free_register - 1;
+                    source = x86operand->basereg;
                 }
 
                 destination = context->next_free_register++;
@@ -395,13 +391,14 @@ void translate_operand(translation_context * context, reil_instruction * instruc
                 reil_register source, destination;
                 source = context->next_free_register;
                 
-                if ( x86operand->dispbytes )
+                unsigned int displacement;
+                if (get_operand_displacement(x86operand, &displacement ))
                 {
                     destination = instruction->operands[0].reg - 1;
                 }
                 else
                 {
-                    destination = x86operand->basereg;
+                    destination = get_operand_basereg(x86operand);
                 }
                 
                 size_t reg_size = (context->x86instruction->mode == MODE_32)?4:2;
@@ -415,23 +412,25 @@ void translate_operand(translation_context * context, reil_instruction * instruc
         }
 
         /* Index register */
-        if (x86operand->indexreg != REG_NOP) 
+        if (get_operand_indexreg(x86operand) != REG_NOP) 
         {
             if ( operand_index == REIL_OPERAND_FLAG_INPUT1 || operand_index == REIL_OPERAND_FLAG_INPUT2 )
             {
-                if (x86operand->scale)
+                int scale = get_operand_scale(x86operand);
+                if (scale)
                 {
-                    reil_register multiplicand = x86operand->indexreg;
-                    int multiplier = x86operand->scale;
+                    reil_register multiplicand = get_operand_indexreg(x86operand);
+                    int multiplier = scale;
                     size_t multiplicands_size = (context->x86instruction->mode == MODE_32)?4:2;
 
                     gen_multiply_reg_integer(context, multiplicand, multiplicands_size, multiplier, multiplicands_size);
                 }
 
-                if (x86operand->basereg != REG_NOP)
+                int basereg = get_operand_basereg(x86operand);
+                if ( basereg != REG_NOP)
                 {
                     reil_register addend1, addend2;
-                    addend1 = x86operand->basereg;
+                    addend1 = basereg;
                     addend2 = context->next_free_register - 1;
 
                     /* TODO: The size of the second addend is currently fixed to the size of the first one, must use actual size. */
@@ -441,10 +440,11 @@ void translate_operand(translation_context * context, reil_instruction * instruc
                 }
 
                 /* Displacement */
-                if ( x86operand->dispbytes )
+                unsigned int displacement;
+                if ( get_operand_displacement(x86operand, &displacement) )
                 {
                     reil_register addend1 = context->next_free_register - 1;
-                    int addend2 = x86operand->displacement;
+                    int addend2 = displacement;
                     size_t addends_size = (context->x86instruction->mode == MODE_32)?4:2;
 
                     gen_add_reg_integer(context, addend1, addends_size, addend2, addends_size);
