@@ -77,6 +77,14 @@ void reil_get_string(reil_instruction * instruction, char * string, size_t size)
             {
                 size_prefix = "qword";
             }
+            else if ( operand->size == 16 )
+            {
+                size_prefix = "oword";
+            }
+            else if ( operand->size == 32 )
+            {
+                size_prefix = "hword";
+            }
             else
             {
                 size_prefix = "???";
