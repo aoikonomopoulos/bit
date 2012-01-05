@@ -1,7 +1,9 @@
 # Test cases for the ADD instruction
 BITS 32
 
+add eax, 0x100
 add eax,ebx
+add dword [eax], 0x100 
 add dword [eax], ebx
 add eax, dword [ebx]
 add dword [eax + 0x100], ebx
