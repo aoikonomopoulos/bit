@@ -57,7 +57,6 @@ static __inline__ enum Mode MODE_CHECK_OPERAND(enum Mode mode, int flags) {
 
 /* Given a pointer to a scratch register, this returns the index */
 #define SCRATCH_REGISTER_INDEX(REG) ((((unsigned long)(REG) - (unsigned long)&context->scratch_registers[0]) / sizeof(context->scratch_registers[0])) + SCRATCH_REGISTER_BASE)
-#define SCRATCH_REGISTER_SIZE(REG_INDEX) (context->scratch_registers[(REG_INDEX) - SCRATCH_REGISTER_BASE].size)
 #define IS_SCRATCH_REGISTER(REG_INDEX) ((REG_INDEX) >= SCRATCH_REGISTER_BASE)
 
 typedef struct _scratch_register
@@ -97,8 +96,10 @@ enum Instruction simple_instructions[] =
 static size_t get_operand_size(INSTRUCTION * x86instruction, OPERAND * x86operand);
 static void init_translation_context(translation_context * context, INSTRUCTION * x86instruction, unsigned long address);
 static void translate_operand(translation_context * context, OPERAND * x86operand, reil_instruction * instruction, reil_operand_index operand_index);
-static int is_simple(enum Instruction x86instruction);
+static int is_direct_translatable(enum Instruction x86instruction);
 static scratch_register * alloc_scratch_reg(translation_context * context);
+static size_t get_scratch_reg_size(translation_context * context, reil_register reg);
+static void calculate_memory_offset(translation_context * context, POPERAND x86operand, int * offset, size_t * offset_size, reil_operand_type * offset_type);
 
 static void gen_unknown(translation_context * context);
 static void gen_storereg_reg(translation_context * context, reil_register reg1, size_t reg1_size, reil_register reg2, size_t reg2_size);
@@ -118,7 +119,7 @@ reil_instructions * reil_translate(unsigned long address, INSTRUCTION * x86instr
 
     reil_instructions * instructions = NULL;
 
-    if (is_simple(x86instruction->type))
+    if (is_direct_translatable(x86instruction->type))
     {
         reil_instruction * instruction = &context.instruction_buffer[context.num_of_instructions++];
         switch (x86instruction->type)
@@ -224,11 +225,63 @@ reil_instructions * reil_translate(unsigned long address, INSTRUCTION * x86instr
                 {
                     if ( x86instruction->op1.type == OPERAND_TYPE_REGISTER && x86instruction->op2.type == OPERAND_TYPE_REGISTER)
                     {
-                        reil_instruction * instruction = &context.instruction_buffer[context.num_of_instructions++];
-                        memcpy(instruction, &reil_instruction_table[REIL_STR], sizeof(reil_instruction_table[0]));
+                        gen_storereg_reg(&context, get_operand_register(&x86instruction->op2),
+                                get_operand_size(x86instruction, &x86instruction->op2),
+                                    get_operand_register(&x86instruction->op1),
+                                    get_operand_size(x86instruction, &x86instruction->op1));
+                    }
+                    else if ( x86instruction->op1.type == OPERAND_TYPE_MEMORY && x86instruction->op2.type == OPERAND_TYPE_REGISTER)
+                    {
+                        int offset;
+                        size_t offset_size;
+                        reil_operand_type offset_type;
+
+                        calculate_memory_offset(&context, &x86instruction->op1, &offset, &offset_size, &offset_type);
+
+                        if ( offset_type == REIL_OPERAND_TYPE_REGISTER )
+                        {
+                            gen_store_reg_reg(&context, (reil_register)offset, offset_size,
+                                    get_operand_register(&x86instruction->op2),
+                                    get_operand_size(x86instruction, &x86instruction->op2));
+                        }
+                        else /* REIL_OPERAND_TYPE_INTEGER */
+                        {
+                            gen_store_int_reg(&context, (reil_integer)offset, offset_size,
+                                    get_operand_register(&x86instruction->op2),
+                                    get_operand_size(x86instruction, &x86instruction->op2));
+                        }
+                    }
+                    else if ( x86instruction->op1.type == OPERAND_TYPE_REGISTER && x86instruction->op2.type == OPERAND_TYPE_MEMORY)
+                    {
+                        int offset;
+                        size_t offset_size;
+                        reil_operand_type offset_type;
+
+                        calculate_memory_offset(&context, &x86instruction->op2, &offset, &offset_size, &offset_type);
+
+                        if ( offset_type == REIL_OPERAND_TYPE_REGISTER )
+                        {
+                            reil_register result_reg = gen_load_reg(&context, (reil_register)offset, offset_size);
+                            gen_storereg_reg(&context, result_reg, get_scratch_reg_size(&context, result_reg), 
+                                    get_operand_register(&x86instruction->op1),
+                                    get_operand_size(x86instruction, &x86instruction->op1));
+                        }
+                        else /* REIL_OPERAND_TYPE_INTEGER */
+                        {
+                            reil_register result_reg = gen_load_int(&context, (reil_integer)offset, offset_size);
+                            gen_storereg_reg(&context, result_reg, get_scratch_reg_size(&context, result_reg), 
+                                    get_operand_register(&x86instruction->op1),
+                                    get_operand_size(x86instruction, &x86instruction->op1));
+                        }
+
+                    }
+#if 0
+                    else if ( x86instruction->op1.type == OPERAND_TYPE_REGISTER && x86instruction->op2.type == OPERAND_TYPE_IMMEDIATE)
+                    {
                         translate_operand(&context, &x86instruction->op2, instruction, REIL_OPERAND_INPUT1);
                         translate_operand(&context, &x86instruction->op1, instruction, REIL_OPERAND_OUTPUT);
                     }
+#endif
                     else
                     {
                         gen_unknown(&context);
@@ -354,80 +407,14 @@ static void translate_operand(translation_context * context, OPERAND * x86operan
     }
     else /* OPERAND_TYPE_MEMORY */
     {
-        /* Offset = Base + (Index * Scale) + Displacement */
-
-        reil_register base = get_operand_basereg(x86operand);
-        reil_register index = get_operand_indexreg(x86operand);
-        reil_integer scale = get_operand_scale(x86operand);
-        reil_integer displacement = 0;
-        int has_displacement = get_operand_displacement(x86operand, (unsigned int*)&displacement);
-
+        
         /* Depending on the operand encoding, this holds the actual address or the register number that contains the address. */
-        int offset = 0;
+        int offset;
         /* We explicitly save the size, because the reil registers and scratch registers  are different internal but used as if the same.*/
-        size_t offset_size = 0;
-        /* We assume it is a register, because this is the most common case. */
-        reil_operand_type offset_type = REIL_OPERAND_TYPE_REGISTER;
+        size_t offset_size;
+        reil_operand_type offset_type;
 
-        if ( index != REG_NOP )
-        {
-            if ( scale )
-            {
-                reil_register multiplicand = index;
-                int multiplier = scale;
-                size_t multiplicands_size = get_operand_size(context->x86instruction, x86operand);
-
-                offset = gen_multiply_reg_int(context, multiplicand, multiplicands_size, multiplier, multiplicands_size);
-                offset_size = SCRATCH_REGISTER_SIZE(offset);
-            }
-            else
-            {
-                offset = index;
-                offset_size = get_operand_size(context->x86instruction, x86operand);
-            }
-        }
-
-        if (base != REG_NOP )
-        {
-            if ( offset_size )
-            {
-                reil_register addend1, addend2;
-                addend1 = base;
-                addend2 = offset;
-
-                size_t addend1_size = get_operand_size(context->x86instruction, x86operand);
-                size_t addend2_size = offset_size;
-
-                offset = gen_add_reg_reg(context, addend1, addend1_size, addend2, addend2_size);
-                offset_size = SCRATCH_REGISTER_SIZE(offset);
-            }
-            else
-            {
-                offset = base;
-                offset_size = get_operand_size(context->x86instruction, x86operand);
-            }
-        }
-
-        if ( has_displacement )
-        {
-            if ( offset_size )
-            {
-                reil_register addend1 = offset;
-                reil_integer  addend2 = displacement;
-
-                size_t addend1_size = offset_size;
-                size_t addend2_size = get_operand_size(context->x86instruction, x86operand);
-
-                offset = gen_add_reg_int(context, addend1, addend1_size, addend2, addend2_size);
-                offset_size = SCRATCH_REGISTER_SIZE(offset);
-            }
-            else
-            {
-                offset = displacement;
-                offset_size = get_operand_size(context->x86instruction, x86operand);
-                offset_type = REIL_OPERAND_TYPE_INTEGER;
-            }
-        }
+        calculate_memory_offset(context, x86operand, &offset, &offset_size, &offset_type);
 
         if ( offset_type == REIL_OPERAND_TYPE_REGISTER )
         {
@@ -436,7 +423,7 @@ static void translate_operand(translation_context * context, OPERAND * x86operan
                 reil_register destination = gen_load_reg(context, offset, offset_size);
                 operand->type = REIL_OPERAND_TYPE_REGISTER;
                 operand->reg = destination;
-                operand->size = SCRATCH_REGISTER_SIZE(destination);
+                operand->size = get_scratch_reg_size(context, destination);
             }
             else
             {
@@ -464,7 +451,7 @@ static void translate_operand(translation_context * context, OPERAND * x86operan
                 reil_register result = gen_load_int(context, offset, offset_size);
                 operand->type = REIL_OPERAND_TYPE_REGISTER;
                 operand->reg = result;
-                operand->size = SCRATCH_REGISTER_SIZE(result);
+                operand->size = get_scratch_reg_size(context,result);
             }
             else
             {
@@ -493,6 +480,11 @@ static scratch_register * alloc_scratch_reg(translation_context * context)
     context->next_free_register++;
 
     return reg;
+}
+
+static size_t get_scratch_reg_size(translation_context * context, reil_register reg)
+{
+    return context->scratch_registers[reg - SCRATCH_REGISTER_BASE].size;
 }
 
 static void gen_unknown(translation_context * context)
@@ -694,7 +686,82 @@ static reil_register gen_add_reg_reg(translation_context * context, reil_registe
     return SCRATCH_REGISTER_INDEX(output);
 }
 
-int is_simple(enum Instruction x86instruction)
+static void calculate_memory_offset(translation_context * context, POPERAND x86operand, int * offset, size_t * offset_size, reil_operand_type * offset_type)
+{
+    /* Offset = Base + (Index * Scale) + Displacement */
+    reil_register base = get_operand_basereg(x86operand);
+    reil_register index = get_operand_indexreg(x86operand);
+    reil_integer scale = get_operand_scale(x86operand);
+    reil_integer displacement = 0;
+    int has_displacement = get_operand_displacement(x86operand, (unsigned int*)&displacement);
+
+    *offset = 0;
+    *offset_size = 0;
+    /* We assume it is a register, because this is the most common case. */
+    *offset_type = REIL_OPERAND_TYPE_REGISTER;
+
+    if ( index != REG_NOP )
+    {
+        if ( scale )
+        {
+            reil_register multiplicand = index;
+            int multiplier = scale;
+            size_t multiplicands_size = get_operand_size(context->x86instruction, x86operand);
+
+            *offset = gen_multiply_reg_int(context, multiplicand, multiplicands_size, multiplier, multiplicands_size);
+            *offset_size = get_scratch_reg_size(context,*offset);
+        }
+        else
+        {
+            *offset = index;
+            *offset_size = get_operand_size(context->x86instruction, x86operand);
+        }
+    }
+
+    if (base != REG_NOP )
+    {
+        if ( *offset_size )
+        {
+            reil_register addend1, addend2;
+            addend1 = base;
+            addend2 = *offset;
+
+            size_t addend1_size = get_operand_size(context->x86instruction, x86operand);
+            size_t addend2_size = *offset_size;
+
+            *offset = gen_add_reg_reg(context, addend1, addend1_size, addend2, addend2_size);
+            *offset_size = get_scratch_reg_size(context,*offset);
+        }
+        else
+        {
+            *offset = base;
+            *offset_size = get_operand_size(context->x86instruction, x86operand);
+        }
+    }
+
+    if ( has_displacement )
+    {
+        if ( *offset_size )
+        {
+            reil_register addend1 = *offset;
+            reil_integer  addend2 = displacement;
+
+            size_t addend1_size = *offset_size;
+            size_t addend2_size = get_operand_size(context->x86instruction, x86operand);
+
+            *offset = gen_add_reg_int(context, addend1, addend1_size, addend2, addend2_size);
+            *offset_size = get_scratch_reg_size(context,*offset);
+        }
+        else
+        {
+            *offset = displacement;
+            *offset_size = get_operand_size(context->x86instruction, x86operand);
+            *offset_type = REIL_OPERAND_TYPE_INTEGER;
+        }
+    }
+}
+
+int is_direct_translatable(enum Instruction x86instruction)
 {
     int i;
     for ( i = 0; i < sizeof(simple_instructions)/sizeof(simple_instructions[0]); i++)
