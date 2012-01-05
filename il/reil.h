@@ -60,6 +60,8 @@ typedef enum _reil_instruction_index
     REIL_LDM,
     REIL_STM,
     REIL_STR,
+    REIL_EXTEND,
+    REIL_REDUCE,
     /* Conditional instructions */
     REIL_BISZ,
     REIL_JCC,
