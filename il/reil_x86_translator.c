@@ -833,6 +833,20 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
         scratch_register * value;
         if (offset_type == REIL_OPERAND_TYPE_REGISTER )
         {
+            if ( context->x86instruction->mode == MODE_32 && offset_size > 4 )
+            {
+                scratch_register * reduced_offset = gen_reduce(context, offset, offset_size, 4);
+                offset = convert_scratch_reg_to_reil_reg(context, reduced_offset);
+                offset_size = reduced_offset->size;
+            }
+
+            if ( context->x86instruction->mode == MODE_16 && offset_size > 2 )
+            {
+                scratch_register * reduced_offset = gen_reduce(context, offset, offset_size, 2);
+                offset = convert_scratch_reg_to_reil_reg(context, reduced_offset);
+                offset_size = reduced_offset->size;
+            }
+
             value = gen_load_reg(context, (reil_register)offset, offset_size);
         }
         else /* REIL_OPERAND_INTEGER */
