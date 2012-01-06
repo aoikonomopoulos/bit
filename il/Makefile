@@ -1,7 +1,7 @@
 CC=gcc
 CFLAGS=-Wall -g
 
-sources=reil_translator.c libdasm.c reil.c reil_x86_translator.c
+sources=reil_translator.c libdasm.c opcode_tables.c reil.c reil_x86_translator.c
 objects=$(sources:.c=.o)
 program=reil_translator
 
