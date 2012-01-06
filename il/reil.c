@@ -30,7 +30,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <string.h>
 #include "reil.h"
 
-void reil_get_string(reil_instruction * instruction, char * string, size_t size)
+void reil_get_string(reil_instruction * instruction, reil_register_formatter formatter, char * string, size_t size)
 {
     size_t i, bytes_left = size;
     int bytes_written, total_bytes_written = 0;
@@ -60,36 +60,8 @@ void reil_get_string(reil_instruction * instruction, char * string, size_t size)
         }
         else if (operand->type == REIL_OPERAND_TYPE_REGISTER) 
         {
-            const char * size_prefix = NULL;
-            if ( operand->size == 1 )
-            {
-                size_prefix = "byte";
-            }
-            else if ( operand->size == 2 )
-            {
-                size_prefix = "word";
-            }
-            else if ( operand->size == 4 )
-            {
-                size_prefix = "dword";
-            }
-            else if ( operand->size == 8 )
-            {
-                size_prefix = "qword";
-            }
-            else if ( operand->size == 16 )
-            {
-                size_prefix = "oword";
-            }
-            else if ( operand->size == 32 )
-            {
-                size_prefix = "hword";
-            }
-            else
-            {
-                size_prefix = "???";
-            }
-            bytes_written = snprintf(string+total_bytes_written, bytes_left, " %s T%u", size_prefix, operand->reg);
+            const char * reg_str = formatter(operand);
+            bytes_written = snprintf(string+total_bytes_written, bytes_left, " %s", reg_str);
         }
         else if (operand->type == REIL_OPERAND_TYPE_SUBADDRESS) 
         {

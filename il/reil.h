@@ -148,7 +148,8 @@ typedef struct _reil_instruction
     reil_instruction_metadata * metadata;
 } reil_instruction;
 
-void reil_get_string(reil_instruction * instruction, char * string, size_t size);
+typedef const char * (*reil_register_formatter)(reil_operand * register_operand);
+void reil_get_string(reil_instruction * instruction, reil_register_formatter formatter, char * string, size_t size);
 unsigned int reil_num_operands(reil_instruction * instruction);
 
 #endif

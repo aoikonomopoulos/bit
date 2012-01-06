@@ -64,7 +64,7 @@ int main(int argc, char** argv)
                 reil_instruction * instruction = &instructions->instruction[i];
 
                 char instruction_string[256];
-                reil_get_string(instruction, instruction_string, sizeof(instruction_string));
+                reil_get_string(instruction, reil_register_x86_formatter, instruction_string, sizeof(instruction_string));
                 if ( i == 0 )
                 {
                     printf("0x%08x %-40s // %s\n", instruction->address + instruction->offset,

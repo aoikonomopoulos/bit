@@ -38,5 +38,7 @@ typedef struct _reil_instructions
 } reil_instructions;
 
 reil_instructions * reil_translate(unsigned long base, unsigned long offset, INSTRUCTION * x86instruction);
+/* The function reil_register_x86_formatter  is NOT thread-safe! */
+const char *reil_register_x86_formatter(reil_operand * register_operand);
 
 #endif
