@@ -76,21 +76,6 @@ typedef struct _translation_context
     scratch_register scratch_registers[MAX_SCRATCH_REGISTERS];
 } translation_context;
 
-
-/* This array hold the X86 instructions that map easily to REIL instructions */
-enum Instruction simple_instructions[] =
-{
-    INSTRUCTION_TYPE_ADD,
-    INSTRUCTION_TYPE_SUB,
-    INSTRUCTION_TYPE_MUL,
-    INSTRUCTION_TYPE_DIV,
-    INSTRUCTION_TYPE_SHX,
-    INSTRUCTION_TYPE_AND,
-    INSTRUCTION_TYPE_OR,
-    INSTRUCTION_TYPE_XOR,
-    INSTRUCTION_TYPE_PUSH
-};
-
 static size_t get_operand_size(INSTRUCTION * x86instruction, OPERAND * x86operand);
 static void init_translation_context(translation_context * context, INSTRUCTION * x86instruction, unsigned long address);
 static scratch_register * alloc_scratch_reg(translation_context * context);
