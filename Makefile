@@ -1,6 +1,15 @@
-all:
-	$(MAKE) -C il
+modules = il
 
-.PHONY : clean
+.PHONY: modules $(modules)
+
+all: modules
+modules: $(modules)
+
+$(modules):
+	$(MAKE) -C $@
+
+.PHONY: clean
 clean:
-	$(MAKE) -C il clean
+	@for module in $(modules); do \
+		$(MAKE) -C $$module clean; \
+	done

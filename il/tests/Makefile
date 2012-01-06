@@ -1,18 +1,12 @@
 # Tests makefile
 
-tests = add sub mov
+sources = arithmetic.asm mov.asm
 
-all: $(tests)
+all: $(basename $(sources))
 
-add: add.asm
+$(basename $(sources)): % : %.asm
 	nasm -o $@ -f bin $<
 
-sub: sub.asm
-	nasm -o $@ -f bin $<
-
-mov: mov.asm
-	nasm -o $@ -f bin $<
-
-.PHONY : clean
+.PHONY: clean
 clean:
-	rm -f $(tests)
+	rm -f $(basename $(sources))

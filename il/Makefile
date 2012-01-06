@@ -5,16 +5,21 @@ sources=reil_translator.c libdasm.c reil.c reil_x86_translator.c
 objects=$(sources:.c=.o)
 program=reil_translator
 
-all: $(program) tests
+submodules=tests
 
+all: $(program) $(submodules) 
+
+# Include generated dependencies
 include $(sources:.c=.d)
 
 $(program): $(objects)
 	$(CC) $(CFLAGS) $(objects) -o $(program)
 
-.PHONY : tests
-tests:
-	$(MAKE) -C tests
+.PHONY : submodules $(submodules) 
+submodules: $(submodules)
+
+$(submodules):
+	$(MAKE) -C $@
 
 # Generate dependencies, excluding system headers.
 %.d: %.c
@@ -24,7 +29,9 @@ tests:
 	rm -f $@.$$$$
 
 
-.PHONY : clean
+.PHONY: clean
 clean:
-	rm -f $(objects) $(program)
-	$(MAKE) -C tests clean
+	rm -f $(objects) $(sources:.c=.d) $(program)
+	@for submodule in $(submodules); do \
+		$(MAKE) -C $$submodule clean; \
+	done
