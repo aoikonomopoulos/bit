@@ -31,7 +31,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define REIL_MAX_INSTRUCTIONS 256 
 #define REIL_MAX_OPERANDS 3
 
-#define REIL_ADDRESS(X) ((X) << 8)
+#define REIL_ADDRESS(BASE, OFFSET) ((BASE) + ((OFFSET) << 8))
 
 typedef enum _reil_instruction_group
 {

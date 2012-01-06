@@ -47,6 +47,7 @@ int main(int argc, char** argv)
     INSTRUCTION x86_instruction;
     size_t len, buflen, c = 0;
     BYTE * buf = read_file(&buflen, argv[1]);
+    unsigned int base = 0, offset = 0;
     do 
     {
         len = get_instruction(&x86_instruction, buf+c, MODE_32);
@@ -57,7 +58,7 @@ int main(int argc, char** argv)
             get_instruction_string(&x86_instruction, FORMAT_INTEL, c, x86_instruction_string,
                     sizeof(x86_instruction_string));
 
-            reil_instructions * instructions = reil_translate(c, &x86_instruction);
+            reil_instructions * instructions = reil_translate(base, offset++, &x86_instruction);
             for ( i = 0; i < instructions->size; i++)
             {
                 reil_instruction * instruction = &instructions->instruction[i];

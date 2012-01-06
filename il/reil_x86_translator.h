@@ -37,6 +37,6 @@ typedef struct _reil_instructions
     reil_instruction instruction[];
 } reil_instructions;
 
-reil_instructions * reil_translate(unsigned long address, INSTRUCTION * instruction);
+reil_instructions * reil_translate(unsigned long base, unsigned long offset, INSTRUCTION * x86instruction);
 
 #endif
