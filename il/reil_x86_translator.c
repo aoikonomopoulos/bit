@@ -215,7 +215,54 @@ reil_instructions * reil_translate(unsigned long address, INSTRUCTION * x86instr
                     gen_storereg_reg(&context, convert_scratch_reg_to_reil_reg(&context, reduced_output), reduced_output->size, get_operand_register(&x86instruction->op1),
                             get_operand_size(x86instruction, &x86instruction->op1));
                 }
-                else if ( x86instruction->op1.type == OPERAND_TYPE_MEMORY && x86instruction->op2.type == OPERAND_TYPE_IMMEDIATE)
+                else if (x86instruction->op1.type == OPERAND_TYPE_MEMORY && x86instruction->op2.type == OPERAND_TYPE_IMMEDIATE)
+                {
+                    int offset;
+                    size_t offset_size;
+                    reil_operand_type offset_type;
+
+                    calculate_memory_offset(&context, &x86instruction->op1, &offset, &offset_size, &offset_type);
+
+                    scratch_register * value;
+                    if (offset_type == REIL_OPERAND_TYPE_REGISTER )
+                    {
+                        value = gen_load_reg(&context, (reil_register)offset, offset_size);
+                    }
+                    else /* REIL_OPERAND_INTEGER */
+                    {
+                        value = gen_load_int(&context, (reil_integer)offset, offset_size);
+                    }
+
+                    reil_instruction * add = alloc_reil_instruction(&context, REIL_ADD);
+
+                    add->operands[REIL_OPERAND_INPUT1].type = REIL_OPERAND_TYPE_REGISTER;
+                    add->operands[REIL_OPERAND_INPUT1].reg = convert_scratch_reg_to_reil_reg(&context, value);
+                    add->operands[REIL_OPERAND_INPUT1].size = value->size;
+
+                    unsigned int imm;
+                    if ( get_operand_immediate(&x86instruction->op2, &imm))
+                    {
+                        add->operands[REIL_OPERAND_INPUT2].type = REIL_OPERAND_TYPE_INTEGER;
+                        add->operands[REIL_OPERAND_INPUT2].integer = (reil_integer)imm;
+                        add->operands[REIL_OPERAND_INPUT2].size = get_operand_size(x86instruction, &x86instruction->op2);
+
+                        scratch_register * output = alloc_scratch_reg(&context);
+                        output->size = 2*MAX(add->operands[REIL_OPERAND_INPUT1].size, add->operands[REIL_OPERAND_INPUT2].size);
+
+                        add->operands[REIL_OPERAND_OUTPUT].type = REIL_OPERAND_TYPE_REGISTER;
+                        add->operands[REIL_OPERAND_OUTPUT].reg = convert_scratch_reg_to_reil_reg(&context, output);
+                        add->operands[REIL_OPERAND_OUTPUT].size = output->size;
+
+                        scratch_register * reduced_output = gen_reduce(&context, convert_scratch_reg_to_reil_reg(&context, output), output->size,  get_operand_size(x86instruction, &x86instruction->op1));
+
+                        gen_store_reg_reg(&context, offset, offset_size, convert_scratch_reg_to_reil_reg(&context, reduced_output), reduced_output->size);
+                    }
+                    else
+                    {
+                        gen_unknown(&context);
+                    }
+                }
+                else if (x86instruction->op1.type == OPERAND_TYPE_MEMORY && x86instruction->op2.type == OPERAND_TYPE_REGISTER)
                 {
                     int offset;
                     size_t offset_size;
