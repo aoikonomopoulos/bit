@@ -1053,19 +1053,23 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
         update_eflags = 0;
     }
 
-    if ( update_eflags )
+    if (update_eflags)
     {
-        if ( context->x86instruction->eflags_affected & EFL_CF )
+        if (context->x86instruction->eflags_affected & EFL_CF)
         {
-            /* Shift the output register by output_reg_size/2 - 1 positions */
-            scratch_register * shifted_output = gen_right_shift(context, output_reg, output_reg_size, output_reg_size/2 - 1);
+            /* Shift the output register by output_reg_size/2*8 - 1 positions */
+            scratch_register * shifted_output = gen_right_shift(context, output_reg, output_reg_size, output_reg_size/2*8 - 1);
             /* AND the result with 0x1 */
             scratch_register * anded_output = gen_and_reg_int(context, get_reil_reg_from_scratch_reg(context, shifted_output), shifted_output->size, 0x1);
             /* Conditionally set the carry flag */
             gen_setc_cf(context, get_reil_reg_from_scratch_reg(context, anded_output), anded_output->size);
         }
 
-        if ( context->x86instruction->eflags_affected & EFL_ZF )
+        if (context->x86instruction->eflags_affected & EFL_PF)
+        {
+        }
+
+        if (context->x86instruction->eflags_affected & EFL_ZF)
         {
             gen_setc_zf(context, output_reg, output_reg_size);
         }
