@@ -85,8 +85,10 @@ static const char * x86reg_table[13][8] =
 
 #define REG_CF (EFLAGS_REGISTER_BASE)
 #define REG_PF (EFLAGS_REGISTER_BASE + 2)
+#define REG_AF (EFLAGS_REGISTER_BASE + 4)
 #define REG_ZF (EFLAGS_REGISTER_BASE + 6)
 #define REG_SF (EFLAGS_REGISTER_BASE + 7)
+#define REG_OF (EFLAGS_REGISTER_BASE + 11)
 
 typedef struct _scratch_register
 {
@@ -1214,6 +1216,10 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
             /* Shift the MSB to the LSB */
             scratch_register * shifted_output = gen_shr_int(context, output_reg, output_reg_size, (output_reg_size << 3) - 1);
             gen_setc_sf(context, get_reil_reg_from_scratch_reg(context, shifted_output), shifted_output->size);
+        }
+        
+        if (context->x86instruction->eflags_affected & EFL_OF)
+        {
         }
     }
 }
