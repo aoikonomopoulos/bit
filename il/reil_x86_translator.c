@@ -1166,8 +1166,8 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
             scratch_register * parity_index = gen_and_reg_int(context, get_reil_reg_from_scratch_reg(context, compressed_lsb), compressed_lsb->size, 0xf);
             /* Store the parity lookup table into a temporary register */
             scratch_register * parity_lookup_table = alloc_scratch_reg(context);
-            parity_lookup_table->size = 4;
-            gen_storereg_int(context, 0x6996, 4, get_reil_reg_from_scratch_reg(context, parity_lookup_table), parity_lookup_table->size);
+            parity_lookup_table->size = 2;
+            gen_storereg_int(context, 0x6996, 2, get_reil_reg_from_scratch_reg(context, parity_lookup_table), parity_lookup_table->size);
             /* Lookup the parity value in the lookup table */
             scratch_register * parity_lookup_table_entry = gen_shr_reg(context, get_reil_reg_from_scratch_reg(context, parity_lookup_table), parity_lookup_table->size, 
                     get_reil_reg_from_scratch_reg(context, parity_index), parity_index->size);
