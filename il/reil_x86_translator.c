@@ -52,9 +52,33 @@ static __inline__ enum Mode MODE_CHECK_OPERAND(enum Mode mode, int flags) {
 		return MODE_16;
 }
 
+/* The rows containing the registers is equal to the reg_table defined
+ * in opcode_tables.c ( part of libdasm ).
+ * The other rows contain registers modeling the EFLAGS bits
+ */
+static const char * x86reg_table[13][8] = 
+{
+	{ "eax",  "ecx",  "edx",  "ebx",  "esp",  "ebp",  "esi",  "edi"  },
+	{ "ax",   "cx",   "dx",   "bx",   "sp",   "bp",   "si",   "di"   },
+	{ "al",   "cl",   "dl",   "bl",   "ah",   "ch",   "dh",   "bh"   },
+	{ "es",   "cs",   "ss",   "ds",   "fs",   "gs",   "??",   "??"   },
+	{ "dr0",  "dr1",  "dr2",  "dr3",  "dr4",  "dr5",  "dr6",  "dr7"  },
+	{ "cr0",  "cr1",  "cr2",  "cr3",  "cr4",  "cr5",  "cr6",  "cr7"  },
+	{ "tr0",  "tr1",  "tr2",  "tr3",  "tr4",  "tr5",  "tr6",  "tr7"  },
+	{ "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7" },
+	{ "mm0",  "mm1",  "mm2",  "mm3",  "mm4",  "mm5",  "mm6",  "mm7"  },
+    /* EFLAGS */
+	{ "cf",   "??",   "pf",   "??",   "af",   "??",   "zf",   "sf"   },
+	{ "tf",   "if",   "df",   "of",   "iopl", "nt",   "??",   "rf"   },
+	{ "vm",   "ac",   "vif",  "vip",  "id",   "??",   "??",   "??"   },
+	{ "??",   "??",   "??",   "??",   "??",   "??",   "??",   "??"   },
+};
+
 #define MAX(X, Y) (((X) > (Y))?(X):(Y))
-/* Based on the entries of reg_table from Libdasm excluding the hint prefixes  */
-#define SCRATCH_REGISTER_BASE 80
+/* Index + 1 of the last element in the x86reg_table */
+#define SCRATCH_REGISTER_BASE (sizeof(x86reg_table)/sizeof(x86reg_table[0][0]))
+/* First element of the 9th row in x86reg_table */
+#define EFLAGS_REGISTER_BASE 9*8 
 #define MAX_SCRATCH_REGISTERS 256
 
 typedef struct _scratch_register
