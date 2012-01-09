@@ -56,7 +56,7 @@ void reil_get_string(reil_instruction * instruction, reil_register_formatter for
         }
         else if (operand->type == REIL_OPERAND_TYPE_INTEGER) 
         {
-                bytes_written = snprintf(string+total_bytes_written, bytes_left, " 0x%x", operand->integer);
+                bytes_written = snprintf(string+total_bytes_written, bytes_left, " 0x%x", operand->integer & ((((1 << (operand->size * 8 - 1)) - 1) << 1) | 1) );
         }
         else if (operand->type == REIL_OPERAND_TYPE_REGISTER) 
         {
@@ -65,7 +65,7 @@ void reil_get_string(reil_instruction * instruction, reil_register_formatter for
         }
         else if (operand->type == REIL_OPERAND_TYPE_SUBADDRESS) 
         {
-            bytes_written = snprintf(string+total_bytes_written, bytes_left, " loc_%xh", operand->subaddress);
+            bytes_written = snprintf(string+total_bytes_written, bytes_left, " loc_%x.%x", operand->subaddress >> 16, operand->subaddress & 0xFFFF);
         }
 
         if ( bytes_written >= bytes_left )
