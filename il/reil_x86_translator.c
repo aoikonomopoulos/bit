@@ -1175,6 +1175,10 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
             /* Conditionally set the parity flag */
             gen_setc_pf(context, get_reil_reg_from_scratch_reg(context, parity), parity->size);
         }
+        
+        if (context->x86instruction->eflags_affected & EFL_AF)
+        {
+        }
 
         if (context->x86instruction->eflags_affected & EFL_ZF)
         {
