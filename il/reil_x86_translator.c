@@ -86,6 +86,7 @@ static const char * x86reg_table[13][8] =
 #define REG_CF (EFLAGS_REGISTER_BASE)
 #define REG_PF (EFLAGS_REGISTER_BASE + 2)
 #define REG_ZF (EFLAGS_REGISTER_BASE + 6)
+#define REG_SF (EFLAGS_REGISTER_BASE + 7)
 
 typedef struct _scratch_register
 {
@@ -143,6 +144,7 @@ static scratch_register * gen_xor_reg_reg(translation_context * context, reil_re
 static void gen_setc_cf(translation_context * context, reil_register reg, size_t reg_size);
 static void gen_setc_pf(translation_context * context, reil_register reg, size_t reg_size);
 static void gen_setc_zf(translation_context * context, reil_register reg, size_t reg_size);
+static void gen_setc_sf(translation_context * context, reil_register reg, size_t reg_size);
 /* REIL instruction group generation functions */
 static void gen_arithmetic_instr(translation_context * context, reil_instruction_index index);
 
@@ -795,6 +797,28 @@ static void gen_setc_zf(translation_context * context, reil_register reg, size_t
     bool_is_zero->operands[2].size = EFLAGS_REGISTER_SIZE;
 }
 
+static void gen_setc_sf(translation_context * context, reil_register reg, size_t reg_size)
+{
+    reil_instruction * bool_is_zero = alloc_reil_instruction(context, REIL_BISZ);
+
+    bool_is_zero->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
+    bool_is_zero->operands[0].reg = reg;
+    bool_is_zero->operands[0].size = reg_size;
+    
+    scratch_register * output = alloc_scratch_reg(context);
+    output->size = reg_size;
+
+    bool_is_zero->operands[2].type = REIL_OPERAND_TYPE_REGISTER;
+    bool_is_zero->operands[2].reg = get_reil_reg_from_scratch_reg(context, output);
+    bool_is_zero->operands[2].size = output->size;
+
+    scratch_register * xored_output = gen_xor_reg_int(context, get_reil_reg_from_scratch_reg(context, output), output->size, -1);
+    scratch_register * anded_output = gen_and_reg_int(context, get_reil_reg_from_scratch_reg(context, xored_output), xored_output->size, 1);
+
+    scratch_register * reduced_output = gen_reduce(context, get_reil_reg_from_scratch_reg(context, anded_output), anded_output->size, EFLAGS_REGISTER_SIZE);
+    gen_storereg_reg(context, get_reil_reg_from_scratch_reg(context, reduced_output), reduced_output->size, REG_SF, EFLAGS_REGISTER_SIZE);
+}
+
 static void calculate_memory_offset(translation_context * context, POPERAND x86operand, int * offset, size_t * offset_size, reil_operand_type * offset_type)
 {
     /* Offset = Base + (Index * Scale) + Displacement */
@@ -1183,6 +1207,13 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
         if (context->x86instruction->eflags_affected & EFL_ZF)
         {
             gen_setc_zf(context, output_reg, output_reg_size);
+        }
+        
+        if (context->x86instruction->eflags_affected & EFL_SF)
+        {
+            /* Shift the MSB to the LSB */
+            scratch_register * shifted_output = gen_shr_int(context, output_reg, output_reg_size, (output_reg_size << 3) - 1);
+            gen_setc_sf(context, get_reil_reg_from_scratch_reg(context, shifted_output), shifted_output->size);
         }
     }
 }
