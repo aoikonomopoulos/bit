@@ -8,7 +8,7 @@ The goal of the binary introspection toolkit (BIT) is to create a collection of 
 Roadmap
 -------
 The first release is focused on creating an intermediate language for static analysis purposes.
-The intermediate language implented is based on [**REIL**][1], an architecture independent intermediate language for binaries focused on reverse engineering. 
+The intermediate language implemented is based on [**REIL**][1], an architecture independent intermediate language for binaries focused on reverse engineering. 
 
 [1]: http://www.zynamics.com/downloads/csw09.pdf "REIL"
 
