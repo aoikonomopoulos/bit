@@ -131,7 +131,6 @@ static scratch_register * gen_load_int(translation_context * context, reil_integ
 static scratch_register * gen_add_reg_int(translation_context * context, reil_register reg, size_t reg_size, int integer, size_t integer_size);
 static scratch_register * gen_multiply_reg_int(translation_context * context, reil_register multiplicand, size_t multiplicand_size, int multiplier, size_t multiplier_size);
 static scratch_register * gen_add_reg_reg(translation_context * context, reil_register addend1, size_t addend1_size, reil_register addend2, size_t addend2_size);
-static scratch_register * gen_extend(translation_context * context, reil_register reg, size_t reg_size,  size_t extended_size);
 static scratch_register * gen_reduce(translation_context * context, reil_register reg, size_t reg_size, size_t reduced_size);
 static scratch_register * gen_shx_int(translation_context * context, reil_register reg, size_t reg_size, reil_instruction_index shift_index, reil_integer shifts);
 static scratch_register * gen_shx_reg(translation_context * context, reil_register reg, size_t reg_size, reil_instruction_index shift_index, reil_register shifts_reg, size_t shifts_reg_size);
@@ -567,32 +566,10 @@ static scratch_register * gen_add_reg_reg(translation_context * context, reil_re
     return output;
 }
 
-static scratch_register * gen_extend(translation_context * context, reil_register reg, size_t reg_size, size_t extended_size)
-{
-    reil_instruction * extend  = &context->instruction_buffer[context->num_of_instructions++];
-    memcpy(extend, &reil_instruction_table[REIL_EXTEND], sizeof(reil_instruction));
-
-    extend->address = REIL_ADDRESS(context->base, context->offset);
-    extend->offset = context->last_offset++;
-
-    extend->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
-    extend->operands[0].reg = reg;
-    extend->operands[0].size = reg_size;
-
-    scratch_register * output = alloc_scratch_reg(context);
-    output->size = extended_size;
-
-    extend->operands[2].type = REIL_OPERAND_TYPE_REGISTER;
-    extend->operands[2].reg = get_reil_reg_from_scratch_reg(context, output);
-    extend->operands[2].size = output->size;
-    
-    return output;
-}
-
 static scratch_register * gen_reduce(translation_context * context, reil_register reg, size_t reg_size, size_t reduced_size)
 {
     reil_instruction * reduce  = &context->instruction_buffer[context->num_of_instructions++];
-    memcpy(reduce, &reil_instruction_table[REIL_REDUCE], sizeof(reil_instruction));
+    memcpy(reduce, &reil_instruction_table[REIL_AND], sizeof(reil_instruction));
 
     reduce->address = REIL_ADDRESS(context->base, context->offset);
     reduce->offset = context->last_offset++;
@@ -600,6 +577,10 @@ static scratch_register * gen_reduce(translation_context * context, reil_registe
     reduce->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
     reduce->operands[0].reg = reg;
     reduce->operands[0].size = reg_size;
+    
+    reduce->operands[1].type = REIL_OPERAND_TYPE_INTEGER;
+    reduce->operands[1].integer= (((1 << ((reduced_size << 3) - 1)) - 1) << 1) | 1;
+    reduce->operands[1].size = reduced_size;
 
     scratch_register * output = alloc_scratch_reg(context);
     output->size = reduced_size;
