@@ -880,7 +880,7 @@ static void gen_eflags_update(translation_context * context, reil_instruction_in
          * -------#--------#--------#---
          *
          * */
-        if (index == REIL_ADD)
+        if (index == REIL_SUB)
         {
             scratch_register * xored_inputs;
             if ( op2->type == REIL_OPERAND_TYPE_REGISTER )
