@@ -136,16 +136,19 @@ static scratch_register * gen_shx_int(translation_context * context, reil_regist
 static scratch_register * gen_shx_reg(translation_context * context, reil_register reg, size_t reg_size, reil_instruction_index shift_index, reil_register shifts_reg, size_t shifts_reg_size);
 static scratch_register * gen_shl_int(translation_context * context, reil_register reg, size_t reg_size, reil_integer shifts);
 static scratch_register * gen_shr_int(translation_context * context, reil_register reg, size_t reg_size, reil_integer shifts);
-static scratch_register * gen_shl_int(translation_context * context, reil_register reg, size_t reg_size, reil_integer shifts);
-static scratch_register * gen_shr_int(translation_context * context, reil_register reg, size_t reg_size, reil_integer shifts);
+static scratch_register * gen_shl_reg(translation_context * context, reil_register reg, size_t reg_size, reil_register shifts_reg, size_t shifts_reg_size);
+static scratch_register * gen_shr_reg(translation_context * context, reil_register reg, size_t reg_size, reil_register shifts_reg, size_t shifts_reg_size);
+static scratch_register * gen_and_reg_reg(translation_context * context, reil_register reg1, size_t reg1_size, reil_register reg2, size_t reg2_size);
 static scratch_register * gen_and_reg_int(translation_context * context, reil_register reg, size_t reg_size, reil_integer integer);
 static scratch_register * gen_xor_reg_int(translation_context * context, reil_register reg, size_t reg_size, reil_integer integer);
 static scratch_register * gen_xor_reg_reg(translation_context * context, reil_register reg1, size_t reg1_size, reil_register reg2, size_t reg2_size);
 
-static void gen_setc_cf(translation_context * context, reil_register reg, size_t reg_size);
-static void gen_setc_pf(translation_context * context, reil_register reg, size_t reg_size);
+static void gen_eflags_update(translation_context * context, reil_instruction_index index, reil_operand * op1, reil_operand * op2, reil_operand * op3);
+
+/* static void gen_setc_cf(translation_context * context, reil_register reg, size_t reg_size); */
+/* static void gen_setc_pf(translation_context * context, reil_register reg, size_t reg_size); */
+/* static void gen_setc_sf(translation_context * context, reil_register reg, size_t reg_size); */
 static void gen_setc_zf(translation_context * context, reil_register reg, size_t reg_size);
-static void gen_setc_sf(translation_context * context, reil_register reg, size_t reg_size);
 /* REIL instruction group generation functions */
 static void gen_arithmetic_instr(translation_context * context, reil_instruction_index index);
 
@@ -657,6 +660,28 @@ static scratch_register * gen_shr_reg(translation_context * context, reil_regist
     return gen_shx_reg(context, reg, reg_size, REIL_RSH, shifts_reg, shifts_reg_size);
 }
 
+static scratch_register * gen_and_reg_reg(translation_context * context, reil_register reg1, size_t reg1_size, reil_register reg2, size_t reg2_size)
+{
+    reil_instruction * and = alloc_reil_instruction(context, REIL_AND);
+
+    and->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
+    and->operands[0].reg = reg1;
+    and->operands[0].size = reg1_size;
+    
+    and->operands[1].type = REIL_OPERAND_TYPE_REGISTER;
+    and->operands[1].integer = reg2;
+    and->operands[1].size = reg2_size;
+
+    scratch_register * output = alloc_scratch_reg(context);
+    output->size = MAX(reg1_size, reg2_size);
+
+    and->operands[2].type = REIL_OPERAND_TYPE_REGISTER;
+    and->operands[2].reg = get_reil_reg_from_scratch_reg(context, output);
+    and->operands[2].size = output->size;
+    
+    return output;
+}
+
 static scratch_register * gen_and_reg_int(translation_context * context, reil_register reg, size_t reg_size, reil_integer integer)
 {
     reil_instruction * and = alloc_reil_instruction(context, REIL_AND);
@@ -723,6 +748,100 @@ static scratch_register * gen_xor_reg_reg(translation_context * context, reil_re
     return output;
 }
 
+static void gen_eflags_update(translation_context * context, reil_instruction_index index, reil_operand * op1, reil_operand * op2, reil_operand * op3)
+{
+    if (context->x86instruction->eflags_affected & EFL_CF)
+    {
+        scratch_register * shifted_output = gen_shr_int(context, op3->reg, op3->size, (op3->size << 2) - 1);
+        scratch_register * carry = gen_reduce(context, get_reil_reg_from_scratch_reg(context, shifted_output), shifted_output->size, EFLAGS_REGISTER_SIZE);
+        gen_storereg_reg(context, get_reil_reg_from_scratch_reg(context, carry), carry->size, REG_CF, EFLAGS_REGISTER_SIZE);
+    }
+
+    /* Source: http://graphics.stanford.edu/~seander/bithacks.html#ParityParallel 
+     * unsigned char byte;
+     * byte ^= byte >> 4;
+     * byte &= 0xf;
+     * unsigned char parity = (0x6996 >> byte) & 1;
+     * */
+    if (context->x86instruction->eflags_affected & EFL_PF)
+    {
+        /* Get the least-significant byte of the result */
+        scratch_register * lsb = gen_reduce(context, op3->reg, op3->size, 1);
+        /* Shift the lsb by four bytes */
+        scratch_register * shifted_lsb = gen_shr_int(context, get_reil_reg_from_scratch_reg(context, lsb), lsb->size, 4);
+        /* XOR the lower and higher nibles to compress the output in the lower nibble */
+        scratch_register * compressed_lsb = gen_xor_reg_reg(context, get_reil_reg_from_scratch_reg(context, lsb), lsb->size, get_reil_reg_from_scratch_reg(context, shifted_lsb), shifted_lsb->size);
+        /* Obtain an index into the parity lookup table by removing the higher nibble */
+        scratch_register * parity_index = gen_and_reg_int(context, get_reil_reg_from_scratch_reg(context, compressed_lsb), compressed_lsb->size, 0xf);
+        /* Store the parity lookup table into a temporary register */
+        scratch_register * parity_lookup_table = alloc_scratch_reg(context);
+        parity_lookup_table->size = 2;
+        gen_storereg_int(context, 0x6996, 2, get_reil_reg_from_scratch_reg(context, parity_lookup_table), parity_lookup_table->size);
+        /* Lookup the parity value in the lookup table */
+        scratch_register * parity_lookup_table_entry = gen_shr_reg(context, get_reil_reg_from_scratch_reg(context, parity_lookup_table), parity_lookup_table->size, 
+                get_reil_reg_from_scratch_reg(context, parity_index), parity_index->size);
+        scratch_register * parity = gen_and_reg_int(context, get_reil_reg_from_scratch_reg(context, parity_lookup_table_entry), parity_lookup_table_entry->size, 1);
+        scratch_register * reduced_parity = gen_reduce(context, get_reil_reg_from_scratch_reg(context, parity), parity->size, EFLAGS_REGISTER_SIZE);
+
+        gen_storereg_reg(context, get_reil_reg_from_scratch_reg(context, reduced_parity), reduced_parity->size, REG_PF, EFLAGS_REGISTER_SIZE);
+    }
+
+    if (context->x86instruction->eflags_affected & EFL_AF)
+    {
+    }
+
+    if (context->x86instruction->eflags_affected & EFL_ZF)
+    {
+        gen_setc_zf(context, op3->reg, op3->size);
+    }
+
+    if (context->x86instruction->eflags_affected & EFL_SF)
+    {
+        /* Shift the MSB to the LSB */
+        scratch_register * sign = gen_shr_int(context, op3->reg, op3->size, (op3->size << 3) - 1);
+        scratch_register * sign_flag = gen_reduce(context, get_reil_reg_from_scratch_reg(context, sign), sign->size, EFLAGS_REGISTER_SIZE);
+
+        gen_storereg_reg(context, get_reil_reg_from_scratch_reg(context, sign_flag), sign_flag->size, REG_SF, EFLAGS_REGISTER_SIZE);
+    }
+
+    if (context->x86instruction->eflags_affected & EFL_OF)
+    {
+        /* For addition we can use the formula !(INPUT1_SIGN ^ INPUT2_SIGN) && (INPUT1_SIGN ^ OUTPUT_SIGN)*/
+        if (index == REIL_ADD)
+        {
+            scratch_register * xored_inputs;
+            if ( op2->type == REIL_OPERAND_TYPE_REGISTER )
+                xored_inputs = gen_xor_reg_reg(context, op1->reg, op1->size, op2->reg, op2->size);
+            else /* REIL_OPERAND_TYPE_INTEGER */
+                xored_inputs = gen_xor_reg_int(context, op1->reg, op1->size, op2->integer);
+
+            scratch_register * neg_xored_inputs = gen_xor_reg_int(context, get_reil_reg_from_scratch_reg(context, xored_inputs), xored_inputs->size, -1);
+
+            scratch_register * xored_input1_output =  gen_xor_reg_reg(context, op1->reg, op1->size, op3->reg, op3->size);
+
+            scratch_register * anded_result = gen_and_reg_reg(context, get_reil_reg_from_scratch_reg(context, neg_xored_inputs), 
+                    neg_xored_inputs->size, get_reil_reg_from_scratch_reg(context, xored_input1_output), xored_input1_output->size);
+
+            /* The value of the OF flag is now in the sign bit of the anded result */
+            scratch_register * overflow_status = gen_shr_int(context, get_reil_reg_from_scratch_reg(context, anded_result), 
+                    anded_result->size, (anded_result->size << 3) - 1);
+
+            /* Reduce the size */
+            scratch_register * reduced_overflow_status = gen_reduce(context, get_reil_reg_from_scratch_reg(context, overflow_status),
+                    overflow_status->size, 1);
+
+            gen_storereg_reg(context, get_reil_reg_from_scratch_reg(context, reduced_overflow_status), reduced_overflow_status->size,
+                    REG_OF, EFLAGS_REGISTER_SIZE);
+
+        }
+
+        if (index == REIL_SUB)
+        {
+        }
+    }
+}
+
+#if 0
 static void gen_setc_cf(translation_context * context, reil_register reg, size_t reg_size)
 {
     reil_instruction * bool_is_zero = alloc_reil_instruction(context, REIL_BISZ);
@@ -767,19 +886,6 @@ static void gen_setc_pf(translation_context * context, reil_register reg, size_t
     gen_storereg_reg(context, get_reil_reg_from_scratch_reg(context, reduced_output), reduced_output->size, REG_PF, EFLAGS_REGISTER_SIZE);
 }
 
-static void gen_setc_zf(translation_context * context, reil_register reg, size_t reg_size)
-{
-    reil_instruction * bool_is_zero = alloc_reil_instruction(context, REIL_BISZ);
-
-    bool_is_zero->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
-    bool_is_zero->operands[0].reg = reg;
-    bool_is_zero->operands[0].size = reg_size;
-
-    bool_is_zero->operands[2].type = REIL_OPERAND_TYPE_REGISTER;
-    bool_is_zero->operands[2].reg = REG_ZF;
-    bool_is_zero->operands[2].size = EFLAGS_REGISTER_SIZE;
-}
-
 static void gen_setc_sf(translation_context * context, reil_register reg, size_t reg_size)
 {
     reil_instruction * bool_is_zero = alloc_reil_instruction(context, REIL_BISZ);
@@ -800,6 +906,20 @@ static void gen_setc_sf(translation_context * context, reil_register reg, size_t
 
     scratch_register * reduced_output = gen_reduce(context, get_reil_reg_from_scratch_reg(context, anded_output), anded_output->size, EFLAGS_REGISTER_SIZE);
     gen_storereg_reg(context, get_reil_reg_from_scratch_reg(context, reduced_output), reduced_output->size, REG_SF, EFLAGS_REGISTER_SIZE);
+}
+#endif
+
+static void gen_setc_zf(translation_context * context, reil_register reg, size_t reg_size)
+{
+    reil_instruction * bool_is_zero = alloc_reil_instruction(context, REIL_BISZ);
+
+    bool_is_zero->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
+    bool_is_zero->operands[0].reg = reg;
+    bool_is_zero->operands[0].size = reg_size;
+
+    bool_is_zero->operands[2].type = REIL_OPERAND_TYPE_REGISTER;
+    bool_is_zero->operands[2].reg = REG_ZF;
+    bool_is_zero->operands[2].size = EFLAGS_REGISTER_SIZE;
 }
 
 static void calculate_memory_offset(translation_context * context, POPERAND x86operand, int * offset, size_t * offset_size, reil_operand_type * offset_type)
@@ -887,25 +1007,18 @@ static reil_register get_reil_reg_from_scratch_reg(translation_context * context
 
 static void gen_arithmetic_instr(translation_context * context, reil_instruction_index index)
 {
-    /* We save the output register so we can update the eflags registers at
-     * the end for all operand combinations.*/
-    reil_register output_reg;
-    size_t output_reg_size;
-    /* Assume that we have to update the eflags registers */
-    int update_eflags = 1;
-
     if ( context->x86instruction->op1.type == OPERAND_TYPE_REGISTER && context->x86instruction->op2.type == OPERAND_TYPE_IMMEDIATE)
     {
         unsigned int imm;
         if ( get_operand_immediate(&context->x86instruction->op2, &imm))
         {
             reil_instruction * arithmetic_instr = alloc_reil_instruction(context, index);
-            output_reg = x86regop_to_reilreg(context, &context->x86instruction->op1);
-            output_reg_size = get_operand_size(context->x86instruction, &context->x86instruction->op1);
+            reil_register op1_reg = x86regop_to_reilreg(context, &context->x86instruction->op1);
+            size_t op1_reg_size = get_operand_size(context->x86instruction, &context->x86instruction->op1);
 
             arithmetic_instr->operands[REIL_OPERAND_INPUT1].type = REIL_OPERAND_TYPE_REGISTER;
-            arithmetic_instr->operands[REIL_OPERAND_INPUT1].reg = output_reg;
-            arithmetic_instr->operands[REIL_OPERAND_INPUT1].size = output_reg_size;
+            arithmetic_instr->operands[REIL_OPERAND_INPUT1].reg = op1_reg;
+            arithmetic_instr->operands[REIL_OPERAND_INPUT1].size = op1_reg_size;
 
             arithmetic_instr->operands[REIL_OPERAND_INPUT2].type = REIL_OPERAND_TYPE_INTEGER;
             arithmetic_instr->operands[REIL_OPERAND_INPUT2].integer = imm;
@@ -923,30 +1036,39 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
             arithmetic_instr->operands[REIL_OPERAND_OUTPUT].reg = get_reil_reg_from_scratch_reg(context, output);
             arithmetic_instr->operands[REIL_OPERAND_OUTPUT].size = output->size;
 
-            scratch_register * reduced_output = gen_reduce(context, get_reil_reg_from_scratch_reg(context, output), output->size, output_reg_size);
+            scratch_register * reduced_output = gen_reduce(context, get_reil_reg_from_scratch_reg(context, output), output->size, op1_reg_size);
 
-            gen_storereg_reg(context, get_reil_reg_from_scratch_reg(context, reduced_output), reduced_output->size, output_reg, output_reg_size);
+            /* Update eflags here, so we have all the results intact without copying stuff. */
+            reil_operand *op1, *op2, op3;
+            op1 = &arithmetic_instr->operands[0];
+            op2 = &arithmetic_instr->operands[1];
+            op3.type = REIL_OPERAND_TYPE_REGISTER;
+            op3.reg = get_reil_reg_from_scratch_reg(context, reduced_output);
+            op3.size = reduced_output->size;
+
+            gen_eflags_update(context, index, op1, op2, &op3);
+
+            gen_storereg_reg(context, op3.reg, op3.size, op1_reg, op1_reg_size);
         }
         else
         {
             gen_unknown(context);
-            update_eflags = 0;
         }
     }
     else if ( context->x86instruction->op1.type == OPERAND_TYPE_REGISTER && context->x86instruction->op2.type == OPERAND_TYPE_REGISTER)
     {
         reil_instruction * arithmetic_instr = alloc_reil_instruction(context, index);
-        output_reg = x86regop_to_reilreg(context, &context->x86instruction->op1);
-        output_reg_size = get_operand_size(context->x86instruction, &context->x86instruction->op1);
+        reil_register op1_reg = x86regop_to_reilreg(context, &context->x86instruction->op1);
+        size_t op1_reg_size = get_operand_size(context->x86instruction, &context->x86instruction->op1);
 
         arithmetic_instr->operands[REIL_OPERAND_INPUT1].type = REIL_OPERAND_TYPE_REGISTER;
-        arithmetic_instr->operands[REIL_OPERAND_INPUT1].reg = output_reg;
-        arithmetic_instr->operands[REIL_OPERAND_INPUT1].size = output_reg_size;
-
+        arithmetic_instr->operands[REIL_OPERAND_INPUT1].reg = op1_reg;
+        arithmetic_instr->operands[REIL_OPERAND_INPUT1].size = op1_reg_size;
+        
         arithmetic_instr->operands[REIL_OPERAND_INPUT2].type = REIL_OPERAND_TYPE_REGISTER;
         arithmetic_instr->operands[REIL_OPERAND_INPUT2].reg = x86regop_to_reilreg(context, &context->x86instruction->op2);
         arithmetic_instr->operands[REIL_OPERAND_INPUT2].size = get_operand_size(context->x86instruction, &context->x86instruction->op2);
-
+        
         scratch_register * output = alloc_scratch_reg(context);
         unsigned int reg_scale;
         if ( index != REIL_DIV || index != REIL_MOD || index != REIL_RSH )
@@ -959,8 +1081,19 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
         arithmetic_instr->operands[REIL_OPERAND_OUTPUT].reg = get_reil_reg_from_scratch_reg(context, output);
         arithmetic_instr->operands[REIL_OPERAND_OUTPUT].size = output->size;
 
-        scratch_register * reduced_output = gen_reduce(context, get_reil_reg_from_scratch_reg(context, output), output->size, output_reg_size);
-        gen_storereg_reg(context, get_reil_reg_from_scratch_reg(context, reduced_output), reduced_output->size, output_reg, output_reg_size);
+        scratch_register * reduced_output = gen_reduce(context, get_reil_reg_from_scratch_reg(context, output), output->size, op1_reg_size);
+
+        /* Update eflags here, so we have all the results intact without copying stuff. */
+        reil_operand *op1, *op2, op3;
+        op1 = &arithmetic_instr->operands[0];
+        op2 = &arithmetic_instr->operands[1];
+        op3.type = REIL_OPERAND_TYPE_REGISTER;
+        op3.reg = get_reil_reg_from_scratch_reg(context, reduced_output);
+        op3.size = reduced_output->size;
+
+        gen_eflags_update(context, index, op1, op2, &op3);
+
+        gen_storereg_reg(context, op3.reg, op3.size, op1_reg, op1_reg_size);
     }
     else if ( context->x86instruction->op1.type == OPERAND_TYPE_REGISTER && context->x86instruction->op2.type == OPERAND_TYPE_MEMORY)
     {
@@ -994,13 +1127,13 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
         }
 
         reil_instruction * arithmetic_instr = alloc_reil_instruction(context, index);
-        output_reg = x86regop_to_reilreg(context, &context->x86instruction->op1);
-        output_reg_size = get_operand_size(context->x86instruction, &context->x86instruction->op1);
+        reil_register op1_reg = x86regop_to_reilreg(context, &context->x86instruction->op1);
+        size_t op1_reg_size = get_operand_size(context->x86instruction, &context->x86instruction->op1);
 
         arithmetic_instr->operands[REIL_OPERAND_INPUT1].type = REIL_OPERAND_TYPE_REGISTER;
-        arithmetic_instr->operands[REIL_OPERAND_INPUT1].reg = output_reg;
-        arithmetic_instr->operands[REIL_OPERAND_INPUT1].size = output_reg_size;
-
+        arithmetic_instr->operands[REIL_OPERAND_INPUT1].reg = op1_reg;
+        arithmetic_instr->operands[REIL_OPERAND_INPUT1].size = op1_reg_size;
+        
         arithmetic_instr->operands[REIL_OPERAND_INPUT2].type = REIL_OPERAND_TYPE_REGISTER;
         arithmetic_instr->operands[REIL_OPERAND_INPUT2].reg = get_reil_reg_from_scratch_reg(context, value);
         arithmetic_instr->operands[REIL_OPERAND_INPUT2].size = value->size;
@@ -1017,8 +1150,19 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
         arithmetic_instr->operands[REIL_OPERAND_OUTPUT].reg = get_reil_reg_from_scratch_reg(context, output);
         arithmetic_instr->operands[REIL_OPERAND_OUTPUT].size = output->size;
 
-        scratch_register * reduced_output = gen_reduce(context, get_reil_reg_from_scratch_reg(context, output), output->size, output_reg_size);
-        gen_storereg_reg(context, get_reil_reg_from_scratch_reg(context, reduced_output), reduced_output->size, output_reg, output_reg_size);
+        scratch_register * reduced_output = gen_reduce(context, get_reil_reg_from_scratch_reg(context, output), output->size, op1_reg_size);
+
+        /* Update eflags here, so we have all the results intact without copying stuff. */
+        reil_operand *op1, *op2, op3;
+        op1 = &arithmetic_instr->operands[0];
+        op2 = &arithmetic_instr->operands[1];
+        op3.type = REIL_OPERAND_TYPE_REGISTER;
+        op3.reg = get_reil_reg_from_scratch_reg(context, reduced_output);
+        op3.size = reduced_output->size;
+
+        gen_eflags_update(context, index, op1, op2, &op3);
+
+        gen_storereg_reg(context, op3.reg, op3.size, op1_reg, op1_reg_size);
     }
     else if (context->x86instruction->op1.type == OPERAND_TYPE_MEMORY && context->x86instruction->op2.type == OPERAND_TYPE_IMMEDIATE)
     {
@@ -1065,15 +1209,21 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
 
             scratch_register * reduced_output = gen_reduce(context, get_reil_reg_from_scratch_reg(context, output), output->size,  get_operand_size(context->x86instruction, &context->x86instruction->op1));
 
-            output_reg = get_reil_reg_from_scratch_reg(context, reduced_output);
-            output_reg_size = reduced_output->size;
+            /* Update eflags here, so we have all the results intact without copying stuff. */
+            reil_operand *op1, *op2, op3;
+            op1 = &arithmetic_instr->operands[0];
+            op2 = &arithmetic_instr->operands[1];
+            op3.type = REIL_OPERAND_TYPE_REGISTER;
+            op3.reg = get_reil_reg_from_scratch_reg(context, reduced_output);
+            op3.size = reduced_output->size;
 
-            gen_store_reg_reg(context, offset, offset_size, output_reg, output_reg_size);
+            gen_eflags_update(context, index, op1, op2, &op3);
+
+            gen_store_reg_reg(context, offset, offset_size, op3.reg, op3.size);
         }
         else
         {
             gen_unknown(context);
-            update_eflags = 0;
         }
     }
     else if (context->x86instruction->op1.type == OPERAND_TYPE_MEMORY && context->x86instruction->op2.type == OPERAND_TYPE_REGISTER)
@@ -1132,82 +1282,27 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
 
         scratch_register * reduced_output = gen_reduce(context, get_reil_reg_from_scratch_reg(context, output), output->size,  get_operand_size(context->x86instruction, &context->x86instruction->op1));
 
-        output_reg = get_reil_reg_from_scratch_reg(context, reduced_output);
-        output_reg_size = reduced_output->size;
+        /* Update eflags here, so we have all the results intact without copying stuff. */
+        reil_operand *op1, *op2, op3;
+        op1 = &arithmetic_instr->operands[0];
+        op2 = &arithmetic_instr->operands[1];
+        op3.type = REIL_OPERAND_TYPE_REGISTER;
+        op3.reg = get_reil_reg_from_scratch_reg(context, reduced_output);
+        op3.size = reduced_output->size;
 
-        gen_store_reg_reg(context, offset, offset_size, output_reg, output_reg_size);
+        gen_eflags_update(context, index, op1, op2, &op3);
+
+        gen_store_reg_reg(context, offset, offset_size, op3.reg, op3.size);
     }
     else
     {
         gen_unknown(context);
-        update_eflags = 0;
-    }
-
-    if (update_eflags)
-    {
-        if (context->x86instruction->eflags_affected & EFL_CF)
-        {
-            /* Shift the output register by output_reg_size/2*8 - 1 positions */
-            scratch_register * shifted_output = gen_shr_int(context, output_reg, output_reg_size, (output_reg_size << 2) - 1);
-            /* AND the result with 1 */
-            scratch_register * anded_output = gen_and_reg_int(context, get_reil_reg_from_scratch_reg(context, shifted_output), shifted_output->size, 1);
-            /* Conditionally set the carry flag */
-            gen_setc_cf(context, get_reil_reg_from_scratch_reg(context, anded_output), anded_output->size);
-        }
-
-        /* Source: http://graphics.stanford.edu/~seander/bithacks.html#ParityParallel 
-         * unsigned char byte;
-         * byte ^= byte >> 4;
-         * byte &= 0xf;
-         * unsigned char parity = (0x6996 >> byte) & 1;
-         * */
-        if (context->x86instruction->eflags_affected & EFL_PF)
-        {
-            /* Get the least-significant byte of the result */
-            scratch_register * lsb = gen_reduce(context, output_reg, output_reg_size, 1);
-            /* Shift the lsb by four bytes */
-            scratch_register * shifted_lsb = gen_shr_int(context, get_reil_reg_from_scratch_reg(context, lsb), lsb->size, 4);
-            /* XOR the lower and higher nibles to compress the output in the lower nibble */
-            scratch_register * compressed_lsb = gen_xor_reg_reg(context, get_reil_reg_from_scratch_reg(context, lsb), lsb->size, get_reil_reg_from_scratch_reg(context, shifted_lsb), shifted_lsb->size);
-            /* Obtain an index into the parity lookup table by removing the higher nibble */
-            scratch_register * parity_index = gen_and_reg_int(context, get_reil_reg_from_scratch_reg(context, compressed_lsb), compressed_lsb->size, 0xf);
-            /* Store the parity lookup table into a temporary register */
-            scratch_register * parity_lookup_table = alloc_scratch_reg(context);
-            parity_lookup_table->size = 2;
-            gen_storereg_int(context, 0x6996, 2, get_reil_reg_from_scratch_reg(context, parity_lookup_table), parity_lookup_table->size);
-            /* Lookup the parity value in the lookup table */
-            scratch_register * parity_lookup_table_entry = gen_shr_reg(context, get_reil_reg_from_scratch_reg(context, parity_lookup_table), parity_lookup_table->size, 
-                    get_reil_reg_from_scratch_reg(context, parity_index), parity_index->size);
-            scratch_register * parity = gen_and_reg_int(context, get_reil_reg_from_scratch_reg(context, parity_lookup_table_entry), parity_lookup_table_entry->size, 1);
-            /* Conditionally set the parity flag */
-            gen_setc_pf(context, get_reil_reg_from_scratch_reg(context, parity), parity->size);
-        }
-        
-        if (context->x86instruction->eflags_affected & EFL_AF)
-        {
-        }
-
-        if (context->x86instruction->eflags_affected & EFL_ZF)
-        {
-            gen_setc_zf(context, output_reg, output_reg_size);
-        }
-        
-        if (context->x86instruction->eflags_affected & EFL_SF)
-        {
-            /* Shift the MSB to the LSB */
-            scratch_register * shifted_output = gen_shr_int(context, output_reg, output_reg_size, (output_reg_size << 3) - 1);
-            gen_setc_sf(context, get_reil_reg_from_scratch_reg(context, shifted_output), shifted_output->size);
-        }
-        
-        if (context->x86instruction->eflags_affected & EFL_OF)
-        {
-        }
     }
 }
 
 static reil_register x86regop_to_reilreg(translation_context * context, POPERAND op)
 {
-    reil_register reg;
+    reil_register reg = -1;
 	int regtype = 0;
     // Determine register type
     switch (MASK_AM(op->flags)) {
