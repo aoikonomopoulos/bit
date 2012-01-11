@@ -806,7 +806,29 @@ static void gen_eflags_update(translation_context * context, reil_instruction_in
 
     if (context->x86instruction->eflags_affected & EFL_OF)
     {
-        /* For addition we can use the formula !(INPUT1_SIGN ^ INPUT2_SIGN) && (INPUT1_SIGN ^ OUTPUT_SIGN)*/
+        /* For addition we can use the formula !(INPUT1_SIGN ^ INPUT2_SIGN) && (INPUT1_SIGN ^ OUTPUT_SIGN),
+         * which generates the following truth table.
+         *
+         * INPUT1 | INPUT2 | OUTPUT | OF
+         * -------#--------#--------#---
+         *      0 |      0 |      0 |  0
+         * -------#--------#--------#---
+         *      0 |      0 |      1 |  1
+         * -------#--------#--------#---
+         *      0 |      1 |      0 |  0
+         * -------#--------#--------#---
+         *      0 |      1 |      1 |  0
+         * -------#--------#--------#---
+         *      1 |      0 |      0 |  0
+         * -------#--------#--------#---
+         *      1 |      0 |      1 |  0
+         * -------#--------#--------#---
+         *      1 |      1 |      0 |  1
+         * -------#--------#--------#---
+         *      1 |      1 |      1 |  0
+         * -------#--------#--------#---
+         *
+         * */
         if (index == REIL_ADD)
         {
             scratch_register * xored_inputs;
@@ -835,8 +857,53 @@ static void gen_eflags_update(translation_context * context, reil_instruction_in
 
         }
 
-        if (index == REIL_SUB)
+        /* For substraction we can use the formula (INPUT1_SIGN ^ INPUT2_SIGN) && (INPUT1_SIGN ^ OUTPUT_SIGN),
+         * which generates the following truth table.
+         *
+         * INPUT1 | INPUT2 | OUTPUT | OF
+         * -------#--------#--------#---
+         *      0 |      0 |      0 |  0
+         * -------#--------#--------#---
+         *      0 |      0 |      1 |  0
+         * -------#--------#--------#---
+         *      0 |      1 |      0 |  0
+         * -------#--------#--------#---
+         *      0 |      1 |      1 |  1
+         * -------#--------#--------#---
+         *      1 |      0 |      0 |  1
+         * -------#--------#--------#---
+         *      1 |      0 |      1 |  0
+         * -------#--------#--------#---
+         *      1 |      1 |      0 |  0
+         * -------#--------#--------#---
+         *      1 |      1 |      1 |  0
+         * -------#--------#--------#---
+         *
+         * */
+        if (index == REIL_ADD)
         {
+            scratch_register * xored_inputs;
+            if ( op2->type == REIL_OPERAND_TYPE_REGISTER )
+                xored_inputs = gen_xor_reg_reg(context, op1->reg, op1->size, op2->reg, op2->size);
+            else /* REIL_OPERAND_TYPE_INTEGER */
+                xored_inputs = gen_xor_reg_int(context, op1->reg, op1->size, op2->integer);
+
+            scratch_register * xored_input1_output =  gen_xor_reg_reg(context, op1->reg, op1->size, op3->reg, op3->size);
+
+            scratch_register * anded_result = gen_and_reg_reg(context, get_reil_reg_from_scratch_reg(context, xored_inputs), 
+                    xored_inputs->size, get_reil_reg_from_scratch_reg(context, xored_input1_output), xored_input1_output->size);
+
+            /* The value of the OF flag is now in the sign bit of the anded result */
+            scratch_register * overflow_status = gen_shr_int(context, get_reil_reg_from_scratch_reg(context, anded_result), 
+                    anded_result->size, (anded_result->size << 3) - 1);
+
+            /* Reduce the size */
+            scratch_register * reduced_overflow_status = gen_reduce(context, get_reil_reg_from_scratch_reg(context, overflow_status),
+                    overflow_status->size, 1);
+
+            gen_storereg_reg(context, get_reil_reg_from_scratch_reg(context, reduced_overflow_status), reduced_overflow_status->size,
+                    REG_OF, EFLAGS_REGISTER_SIZE);
+
         }
     }
 }
