@@ -36,7 +36,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 /* Check for address/operand size override, copied from libdasm.c */
 
-static __inline__ enum Mode MODE_CHECK_ADDR(enum Mode mode, int flags) {
+static __inline__ enum Mode MODE_CHECK_ADDR(enum Mode mode, int flags) 
+{
 	if (((mode == MODE_32) && (MASK_PREFIX_ADDR(flags) == 0)) ||
     	    ((mode == MODE_16) && (MASK_PREFIX_ADDR(flags) == 1)))
 		return MODE_32;
@@ -44,7 +45,8 @@ static __inline__ enum Mode MODE_CHECK_ADDR(enum Mode mode, int flags) {
 		return MODE_16;
 }
 
-static __inline__ enum Mode MODE_CHECK_OPERAND(enum Mode mode, int flags) {
+static __inline__ enum Mode MODE_CHECK_OPERAND(enum Mode mode, int flags) 
+{
 	if (((mode == MODE_32) && (MASK_PREFIX_OPERAND(flags) == 0)) ||
     	    ((mode == MODE_16) && (MASK_PREFIX_OPERAND(flags) == 1)))
 		return MODE_32;
@@ -73,6 +75,96 @@ static const char * x86reg_table[13][8] =
 	{ "vm",   "ac",   "vif",  "vip",  "id",   "??",   "??",   "??"   },
 	{ "??",   "??",   "??",   "??",   "??",   "??",   "??",   "??"   },
 };
+
+#define EFLAG_NOT_IMPL  0x0
+#define EFLAG_BLANK     0x0
+#define EFLAG_TEST      0x1
+#define EFLAG_MODIFY    0x2
+#define EFLAG_RESET     0x4
+#define EFLAG_SET       0x8
+#define EFLAG_UNDEF     0xc
+#define EFLAG_RESTORE   0x10
+
+typedef struct _eflag_affect_reference
+{
+    unsigned char ef_of;
+    unsigned char ef_sf;
+    unsigned char ef_zf;
+    unsigned char ef_af;
+    unsigned char ef_pf;
+    unsigned char ef_cf;
+    unsigned char ef_tf;
+    unsigned char ef_if;
+    unsigned char ef_df;
+    unsigned char ef_nt;
+    unsigned char ef_rf;
+} eflag_affect_reference;
+
+/* Implements the EFLAGS cross-reference table from Vol. 1 A-1
+ * index on the libdasm instruction types for fast indexing. */
+static eflag_affect_reference eflags_cross_reference[] =
+{
+	/* INSTRUCTION_TYPE_ASC */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_DCL */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_MOV */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_MOVSR */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_ADD */  {EFLAG_MODIFY, EFLAG_MODIFY, EFLAG_MODIFY,EFLAG_MODIFY, EFLAG_MODIFY, EFLAG_MODIFY},
+	/* INSTRUCTION_TYPE_XADD */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_ADC */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_SUB */ {EFLAG_MODIFY, EFLAG_MODIFY, EFLAG_MODIFY,EFLAG_MODIFY, EFLAG_MODIFY, EFLAG_MODIFY},
+	/* INSTRUCTION_TYPE_SBB */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_INC */ {EFLAG_MODIFY, EFLAG_MODIFY, EFLAG_MODIFY,EFLAG_MODIFY},
+	/* INSTRUCTION_TYPE_DEC */ {EFLAG_MODIFY, EFLAG_MODIFY, EFLAG_MODIFY,EFLAG_MODIFY},
+	/* INSTRUCTION_TYPE_DIV */ {EFLAG_UNDEF, EFLAG_UNDEF, EFLAG_UNDEF,EFLAG_UNDEF, EFLAG_UNDEF, EFLAG_UNDEF},
+	/* INSTRUCTION_TYPE_IDIV */ {EFLAG_UNDEF, EFLAG_UNDEF, EFLAG_UNDEF,EFLAG_UNDEF, EFLAG_UNDEF, EFLAG_UNDEF},
+	/* INSTRUCTION_TYPE_NOT */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_NEG */ {EFLAG_MODIFY, EFLAG_MODIFY, EFLAG_MODIFY,EFLAG_MODIFY, EFLAG_MODIFY, EFLAG_MODIFY},
+	/* INSTRUCTION_TYPE_STOS */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_LODS */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_SCAS */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_MOVS */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_MOVSX */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_MOVZX */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_CMPS */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_SHX */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_ROX, */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_MUL */ {EFLAG_MODIFY, EFLAG_UNDEF, EFLAG_UNDEF,EFLAG_UNDEF, EFLAG_UNDEF, EFLAG_MODIFY},
+	/* INSTRUCTION_TYPE_IMUL */ {EFLAG_MODIFY, EFLAG_UNDEF, EFLAG_UNDEF,EFLAG_UNDEF, EFLAG_UNDEF, EFLAG_MODIFY},
+	/* INSTRUCTION_TYPE_EIMUL, */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_XOR */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_LEA */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_XCHG */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_CMP */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_TEST */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_PUSH */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_AND */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_OR */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_POP */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_JMP */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_JMPC */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_JECXZ */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_SETC */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_MOVC */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_LOOP */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_CALL */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_RET */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_ENTER */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_INT */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_BT */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_BTS */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_BTR */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_BTC */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_BSF */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_BSR */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_BSWAP */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_SGDT */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_SIDT */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_SLDT */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_LFP */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_CLD */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_STD */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_XLAT */ {EFLAG_NOT_IMPL},
+}; 
 
 #define MAX(X, Y) (((X) > (Y))?(X):(Y))
 /* Index + 1 of the last element in the x86reg_table */
@@ -760,11 +852,23 @@ static scratch_register * gen_xor_reg_reg(translation_context * context, reil_re
 
 static void gen_eflags_update(translation_context * context, reil_operand * op1, reil_operand * op2, reil_operand * op3)
 {
-    if (context->x86instruction->eflags_affected & EFL_CF)
+    if (eflags_cross_reference[context->x86instruction->type].ef_cf & EFLAG_MODIFY)
     {
         scratch_register * shifted_output = gen_shr_int(context, op3->reg, op3->size, (op3->size << 2) - 1);
         scratch_register * carry = gen_reduce(context, get_reil_reg_from_scratch_reg(context, shifted_output), shifted_output->size, EFLAGS_REGISTER_SIZE);
         gen_storereg_reg(context, get_reil_reg_from_scratch_reg(context, carry), carry->size, REG_CF, EFLAGS_REGISTER_SIZE);
+    }
+    else if (eflags_cross_reference[context->x86instruction->type].ef_cf & EFLAG_UNDEF)
+    {
+        gen_undef(context, REG_CF, EFLAGS_REGISTER_SIZE);
+    }
+    else if (eflags_cross_reference[context->x86instruction->type].ef_cf & EFLAG_RESET)
+    {
+        gen_storereg_int(context, REG_CF, EFLAGS_REGISTER_SIZE, 0, EFLAGS_REGISTER_SIZE);
+    }
+    else if (eflags_cross_reference[context->x86instruction->type].ef_cf & EFLAG_SET)
+    {
+        gen_storereg_int(context, REG_CF, EFLAGS_REGISTER_SIZE, 0, EFLAGS_REGISTER_SIZE);
     }
 
     /* Source: http://graphics.stanford.edu/~seander/bithacks.html#ParityParallel 
@@ -773,7 +877,7 @@ static void gen_eflags_update(translation_context * context, reil_operand * op1,
      * byte &= 0xf;
      * unsigned char parity = (0x6996 >> byte) & 1;
      * */
-    if (context->x86instruction->eflags_affected & EFL_PF)
+    if (eflags_cross_reference[context->x86instruction->type].ef_pf & EFLAG_MODIFY)
     {
         /* Get the least-significant byte of the result */
         scratch_register * lsb = gen_reduce(context, op3->reg, op3->size, 1);
@@ -795,17 +899,53 @@ static void gen_eflags_update(translation_context * context, reil_operand * op1,
 
         gen_storereg_reg(context, get_reil_reg_from_scratch_reg(context, reduced_parity), reduced_parity->size, REG_PF, EFLAGS_REGISTER_SIZE);
     }
-
-    if (context->x86instruction->eflags_affected & EFL_AF)
+    else if (eflags_cross_reference[context->x86instruction->type].ef_pf & EFLAG_UNDEF)
     {
+        gen_undef(context, REG_PF, EFLAGS_REGISTER_SIZE);
+    }
+    else if (eflags_cross_reference[context->x86instruction->type].ef_pf & EFLAG_RESET)
+    {
+        gen_storereg_int(context, REG_PF, EFLAGS_REGISTER_SIZE, 0, EFLAGS_REGISTER_SIZE);
+    }
+    else if (eflags_cross_reference[context->x86instruction->type].ef_pf & EFLAG_SET)
+    {
+        gen_storereg_int(context, REG_PF, EFLAGS_REGISTER_SIZE, 0, EFLAGS_REGISTER_SIZE);
     }
 
-    if (context->x86instruction->eflags_affected & EFL_ZF)
+    if (eflags_cross_reference[context->x86instruction->type].ef_af & EFLAG_MODIFY)
+    {
+    }
+    else if (eflags_cross_reference[context->x86instruction->type].ef_af & EFLAG_UNDEF)
+    {
+        gen_undef(context, REG_AF, EFLAGS_REGISTER_SIZE);
+    }
+    else if (eflags_cross_reference[context->x86instruction->type].ef_af & EFLAG_RESET)
+    {
+        gen_storereg_int(context, REG_AF, EFLAGS_REGISTER_SIZE, 0, EFLAGS_REGISTER_SIZE);
+    }
+    else if (eflags_cross_reference[context->x86instruction->type].ef_af & EFLAG_SET)
+    {
+        gen_storereg_int(context, REG_AF, EFLAGS_REGISTER_SIZE, 0, EFLAGS_REGISTER_SIZE);
+    }
+
+    if (eflags_cross_reference[context->x86instruction->type].ef_zf & EFLAG_MODIFY)
     {
         gen_setc_zf(context, op3->reg, op3->size);
     }
+    else if (eflags_cross_reference[context->x86instruction->type].ef_zf & EFLAG_UNDEF)
+    {
+        gen_undef(context, REG_ZF, EFLAGS_REGISTER_SIZE);
+    }
+    else if (eflags_cross_reference[context->x86instruction->type].ef_zf & EFLAG_RESET)
+    {
+        gen_storereg_int(context, REG_ZF, EFLAGS_REGISTER_SIZE, 0, EFLAGS_REGISTER_SIZE);
+    }
+    else if (eflags_cross_reference[context->x86instruction->type].ef_zf & EFLAG_SET)
+    {
+        gen_storereg_int(context, REG_ZF, EFLAGS_REGISTER_SIZE, 0, EFLAGS_REGISTER_SIZE);
+    }
 
-    if (context->x86instruction->eflags_affected & EFL_SF)
+    if (eflags_cross_reference[context->x86instruction->type].ef_sf & EFLAG_MODIFY)
     {
         /* Shift the MSB to the LSB */
         scratch_register * sign = gen_shr_int(context, op3->reg, op3->size, (op3->size << 3) - 1);
@@ -813,8 +953,20 @@ static void gen_eflags_update(translation_context * context, reil_operand * op1,
 
         gen_storereg_reg(context, get_reil_reg_from_scratch_reg(context, sign_flag), sign_flag->size, REG_SF, EFLAGS_REGISTER_SIZE);
     }
+    else if (eflags_cross_reference[context->x86instruction->type].ef_sf & EFLAG_UNDEF)
+    {
+        gen_undef(context, REG_SF, EFLAGS_REGISTER_SIZE);
+    }
+    else if (eflags_cross_reference[context->x86instruction->type].ef_sf & EFLAG_RESET)
+    {
+        gen_storereg_int(context, REG_SF, EFLAGS_REGISTER_SIZE, 0, EFLAGS_REGISTER_SIZE);
+    }
+    else if (eflags_cross_reference[context->x86instruction->type].ef_sf & EFLAG_SET)
+    {
+        gen_storereg_int(context, REG_SF, EFLAGS_REGISTER_SIZE, 0, EFLAGS_REGISTER_SIZE);
+    }
 
-    if (context->x86instruction->eflags_affected & EFL_OF)
+    if (eflags_cross_reference[context->x86instruction->type].ef_of & EFLAG_MODIFY)
     {
         /* For addition we can use the formula !(INPUT1_SIGN ^ INPUT2_SIGN) && (INPUT1_SIGN ^ OUTPUT_SIGN),
          * which generates the following truth table.
@@ -915,6 +1067,18 @@ static void gen_eflags_update(translation_context * context, reil_operand * op1,
                     REG_OF, EFLAGS_REGISTER_SIZE);
 
         }
+    }
+    else if (eflags_cross_reference[context->x86instruction->type].ef_of & EFLAG_UNDEF)
+    {
+        gen_undef(context, REG_OF, EFLAGS_REGISTER_SIZE);
+    }
+    else if (eflags_cross_reference[context->x86instruction->type].ef_of & EFLAG_RESET)
+    {
+        gen_storereg_int(context, REG_OF, EFLAGS_REGISTER_SIZE, 0, EFLAGS_REGISTER_SIZE);
+    }
+    else if (eflags_cross_reference[context->x86instruction->type].ef_of & EFLAG_SET)
+    {
+        gen_storereg_int(context, REG_OF, EFLAGS_REGISTER_SIZE, 0, EFLAGS_REGISTER_SIZE);
     }
 }
 
@@ -1452,7 +1616,8 @@ static reil_register x86regop_to_reilreg(translation_context * context, POPERAND
 
 const char *reil_register_x86_formatter(reil_operand * register_operand)
 {
-    static char format_buffer[strlen("xword Txxx")+1];
+    /* strlen("xword Txxx") + 1 == 11*/
+    static char format_buffer[11];
     if ( register_operand->reg >= SCRATCH_REGISTER_BASE )
     {
         const char * size_prefix;
