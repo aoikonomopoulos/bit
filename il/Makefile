@@ -1,5 +1,6 @@
 CC=gcc
-CFLAGS=-Wall -g
+CFLAGS=-Wall -g -O0
+LDFLAGS=
 
 sources=reil_translator.c libdasm.c opcode_tables.c reil.c reil_x86_translator.c
 objects=$(sources:.c=.o)
@@ -13,7 +14,7 @@ all: $(program) $(submodules)
 include $(sources:.c=.d)
 
 $(program): $(objects)
-	$(CC) $(CFLAGS) $(objects) -o $(program)
+	$(CC) $(LDFLAGS) $(objects) -o $(program)
 
 .PHONY : submodules $(submodules) 
 submodules: $(submodules)
