@@ -24,3 +24,9 @@ sub dword [eax + ebx*2], ecx
 sub eax, dword [ebx + ecx*2]
 sub [0x100], eax
 sub eax, [0x100]
+
+mul ebx
+mul dword [ebx]
+mul dword [ebx + 0x100]
+mul dword [ebx + ecx*2]
+mul word [0x100]
