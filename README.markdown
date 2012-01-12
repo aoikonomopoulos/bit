@@ -14,7 +14,7 @@ The intermediate language implemented is based on [**REIL**][1], an architecture
 
 Example
 -------
-The following output is the translation of object code from tests/add.asm
+The following output is part of the translation of object code from tests/arithmetic.asm:
     0x00000000 ADD eax, 0x100, qword T104               // add eax,0x100
     0x00000001 AND qword T104, 0xffffffff, dword T105  
     0x00000002 RSH dword T105, 0xf, dword T106         
