@@ -122,6 +122,7 @@ static reil_register x86regop_to_reilreg(translation_context * context, POPERAND
 
 /* Basic REIL instruction generation functions */
 static void gen_unknown(translation_context * context);
+static void gen_undef(translation_context * context, reil_register reg, size_t reg_size);
 static void gen_storereg_reg(translation_context * context, reil_register reg1, size_t reg1_size, reil_register reg2, size_t reg2_size);
 static void gen_storereg_int(translation_context * context, reil_integer integer, size_t integer_size, reil_register reg, size_t reg_size);
 static void gen_store_reg_reg(translation_context * context, reil_register address, size_t address_size, reil_register value, size_t value_size);
@@ -143,7 +144,7 @@ static scratch_register * gen_and_reg_int(translation_context * context, reil_re
 static scratch_register * gen_xor_reg_int(translation_context * context, reil_register reg, size_t reg_size, reil_integer integer);
 static scratch_register * gen_xor_reg_reg(translation_context * context, reil_register reg1, size_t reg1_size, reil_register reg2, size_t reg2_size);
 
-static void gen_eflags_update(translation_context * context, reil_instruction_index index, reil_operand * op1, reil_operand * op2, reil_operand * op3);
+static void gen_eflags_update(translation_context * context, reil_operand * op1, reil_operand * op2, reil_operand * op3);
 
 /* static void gen_setc_cf(translation_context * context, reil_register reg, size_t reg_size); */
 /* static void gen_setc_pf(translation_context * context, reil_register reg, size_t reg_size); */
@@ -377,6 +378,15 @@ static void gen_unknown(translation_context * context)
 
     unknown_instruction->address = REIL_ADDRESS(context->base, context->offset);
     unknown_instruction->offset = context->last_offset++;
+}
+
+static void gen_undef(translation_context * context, reil_register reg, size_t reg_size)
+{
+    reil_instruction * undef = alloc_reil_instruction(context, REIL_UNDEF);
+
+    undef->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
+    undef->operands[0].reg = reg;
+    undef->operands[0].size = reg_size;
 }
 
 static void gen_storereg_reg(translation_context * context, reil_register reg1, size_t reg1_size, reil_register reg2, size_t reg2_size)
@@ -748,7 +758,7 @@ static scratch_register * gen_xor_reg_reg(translation_context * context, reil_re
     return output;
 }
 
-static void gen_eflags_update(translation_context * context, reil_instruction_index index, reil_operand * op1, reil_operand * op2, reil_operand * op3)
+static void gen_eflags_update(translation_context * context, reil_operand * op1, reil_operand * op2, reil_operand * op3)
 {
     if (context->x86instruction->eflags_affected & EFL_CF)
     {
@@ -829,7 +839,7 @@ static void gen_eflags_update(translation_context * context, reil_instruction_in
          * -------#--------#--------#---
          *
          * */
-        if (index == REIL_ADD)
+        if (context->x86instruction->type == INSTRUCTION_TYPE_ADD )
         {
             scratch_register * xored_inputs;
             if ( op2->type == REIL_OPERAND_TYPE_REGISTER )
@@ -880,7 +890,7 @@ static void gen_eflags_update(translation_context * context, reil_instruction_in
          * -------#--------#--------#---
          *
          * */
-        if (index == REIL_SUB)
+        if (context->x86instruction->type == INSTRUCTION_TYPE_SUB)
         {
             scratch_register * xored_inputs;
             if ( op2->type == REIL_OPERAND_TYPE_REGISTER )
@@ -1113,7 +1123,7 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
             op3.reg = get_reil_reg_from_scratch_reg(context, reduced_output);
             op3.size = reduced_output->size;
 
-            gen_eflags_update(context, index, op1, op2, &op3);
+            gen_eflags_update(context, op1, op2, &op3);
 
             gen_storereg_reg(context, op3.reg, op3.size, op1_reg, op1_reg_size);
         }
@@ -1158,7 +1168,7 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
         op3.reg = get_reil_reg_from_scratch_reg(context, reduced_output);
         op3.size = reduced_output->size;
 
-        gen_eflags_update(context, index, op1, op2, &op3);
+        gen_eflags_update(context, op1, op2, &op3);
 
         gen_storereg_reg(context, op3.reg, op3.size, op1_reg, op1_reg_size);
     }
@@ -1227,7 +1237,7 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
         op3.reg = get_reil_reg_from_scratch_reg(context, reduced_output);
         op3.size = reduced_output->size;
 
-        gen_eflags_update(context, index, op1, op2, &op3);
+        gen_eflags_update(context, op1, op2, &op3);
 
         gen_storereg_reg(context, op3.reg, op3.size, op1_reg, op1_reg_size);
     }
@@ -1284,7 +1294,7 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
             op3.reg = get_reil_reg_from_scratch_reg(context, reduced_output);
             op3.size = reduced_output->size;
 
-            gen_eflags_update(context, index, op1, op2, &op3);
+            gen_eflags_update(context, op1, op2, &op3);
 
             gen_store_reg_reg(context, offset, offset_size, op3.reg, op3.size);
         }
@@ -1357,7 +1367,7 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
         op3.reg = get_reil_reg_from_scratch_reg(context, reduced_output);
         op3.size = reduced_output->size;
 
-        gen_eflags_update(context, index, op1, op2, &op3);
+        gen_eflags_update(context, op1, op2, &op3);
 
         gen_store_reg_reg(context, offset, offset_size, op3.reg, op3.size);
     }
