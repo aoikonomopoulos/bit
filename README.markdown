@@ -15,25 +15,29 @@ The intermediate language implemented is based on [**REIL**][1], an architecture
 Example
 -------
 The following output is the translation of object code from tests/add.asm
-
-	0x00000000 ADD T0/4, T3/4, T256/8                   // add eax,ebx
-	0x00000001 STR T256/4, , T0/4                       // add eax,ebx
-
-	0x00000200 LDM T0/4, , T256/4                       // add [eax],ebx
-	0x00000201 ADD T256/4, T3/4, T257/8                 // add [eax],ebx
-	0x00000202 STM T257/4, , T0/4                       // add [eax],ebx
-
-	0x00000400 ADD T0/4, 0x100/4, T256/8                // add [eax+0x100],ebx
-	0x00000401 LDM T256/4, , T257/4                     // add [eax+0x100],ebx
-	0x00000402 ADD T257/4, T3/4, T258/8                 // add [eax+0x100],ebx
-	0x00000403 STM T258/4, , T256/4                     // add [eax+0x100],ebx
-
-	0x00000a00 LDM T3/4, , T256/4                       // add eax,[ebx]
-	0x00000a01 ADD T0/4, T256/4, T257/8                 // add eax,[ebx]
-	0x00000a02 STR T257/4, , T0/4                       // add eax,[ebx]
-
-	0x00000c00 MUL T3/4, 0x2/4, T256/8                  // add [eax+ebx*2],ecx
-	0x00000c01 ADD T0/4, T256/4, T257/8                 // add [eax+ebx*2],ecx
-	0x00000c02 LDM T257/4, , T258/4                     // add [eax+ebx*2],ecx
-	0x00000c03 ADD T258/4, T1/4, T259/8                 // add [eax+ebx*2],ecx
-	0x00000c04 STM T259/4, , T257/4                     // add [eax+ebx*2],ecx
+    0x00000000 ADD eax, 0x100, qword T104               // add eax,0x100
+    0x00000001 AND qword T104, 0xffffffff, dword T105  
+    0x00000002 RSH dword T105, 0xf, dword T106         
+    0x00000003 AND dword T106, 0xff, byte T107         
+    0x00000004 STR byte T107, , cf                     
+    0x00000005 AND dword T105, 0xff, byte T108         
+    0x00000006 RSH byte T108, 0x4, byte T109           
+    0x00000007 XOR byte T108, byte T109, byte T110     
+    0x00000008 AND byte T110, 0xf, byte T111           
+    0x00000009 STR 0x6996, , word T112                 
+    0x0000000a RSH word T112, byte T111, word T113     
+    0x0000000b AND word T113, 0x1, word T114           
+    0x0000000c AND word T114, 0xff, byte T115          
+    0x0000000d STR byte T115, , pf                     
+    0x0000000e BISZ dword T105, , zf                   
+    0x0000000f RSH dword T105, 0x1f, dword T116        
+    0x00000010 AND dword T116, 0xff, byte T117         
+    0x00000011 STR byte T117, , sf                     
+    0x00000012 XOR eax, 0x100, dword T118              
+    0x00000013 XOR dword T118, 0xffffffff, dword T119  
+    0x00000014 XOR eax, dword T105, dword T120         
+    0x00000015 AND dword T119, dword T120, dword T121  
+    0x00000016 RSH dword T121, 0x1f, dword T122        
+    0x00000017 AND dword T122, 0xff, byte T123         
+    0x00000018 STR byte T123, , of                     
+    0x00000019 STR dword T105, , eax                   
