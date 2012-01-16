@@ -25,6 +25,13 @@ sub eax, dword [ebx + ecx*2]
 sub [0x100], eax
 sub eax, [0x100]
 
+div bl
+div byte [ebx]
+div bx
+div word [ebx]
+div ebx
+div dword [ebx]
+
 mul ebx
 mul dword [ebx]
 mul dword [ebx + 0x100]
