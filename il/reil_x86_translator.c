@@ -247,12 +247,16 @@ static scratch_register * gen_xor_reg_int(translation_context * context, reil_re
 static scratch_register * gen_xor_reg_reg(translation_context * context, reil_register reg1, size_t reg1_size, reil_register reg2, size_t reg2_size);
 static scratch_register * gen_or_reg_reg(translation_context * context, reil_register reg1, size_t reg1_size, reil_register reg2, size_t reg2_size);
 
+static void gen_is_zero(translation_context * context, reil_register reg1, size_t reg1_size, reil_register reg2, size_t reg2_size);
+static void gen_is_not_zero(translation_context * context, reil_register reg1, size_t reg1_size, reil_register reg2, size_t reg2_size);
+
 static void gen_eflags_update(translation_context * context, reil_operand * op1, reil_operand * op2, reil_operand * op3);
 
 /* static void gen_setc_cf(translation_context * context, reil_register reg, size_t reg_size); */
 /* static void gen_setc_pf(translation_context * context, reil_register reg, size_t reg_size); */
 /* static void gen_setc_sf(translation_context * context, reil_register reg, size_t reg_size); */
-static void gen_setc_zf(translation_context * context, reil_register reg, size_t reg_size);
+/* static void gen_setc_zf(translation_context * context, reil_register reg, size_t reg_size); */
+
 /* REIL instruction group generation functions */
 static void gen_arithmetic_instr(translation_context * context, reil_instruction_index index);
 
@@ -883,6 +887,38 @@ static scratch_register * gen_or_reg_reg(translation_context * context, reil_reg
     return output;
 }
 
+static void gen_is_zero(translation_context * context, reil_register reg1, size_t reg1_size, reil_register reg2, size_t reg2_size)
+{
+    reil_instruction * is_zero = alloc_reil_instruction(context, REIL_BISZ);
+
+    is_zero->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
+    is_zero->operands[0].reg = reg1;
+    is_zero->operands[0].size = reg1_size;
+    
+    is_zero->operands[2].type = REIL_OPERAND_TYPE_REGISTER;
+    is_zero->operands[2].reg = reg2;
+    is_zero->operands[2].size = reg2_size;
+}
+
+static void gen_is_not_zero(translation_context * context, reil_register reg1, size_t reg1_size, reil_register reg2, size_t reg2_size)
+{
+    reil_instruction * is_zero = alloc_reil_instruction(context, REIL_BISZ);
+
+    is_zero->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
+    is_zero->operands[0].reg = reg1;
+    is_zero->operands[0].size = reg1_size;
+
+    scratch_register * output = alloc_scratch_reg(context);
+    output->size = reg2_size;
+    
+    is_zero->operands[2].type = REIL_OPERAND_TYPE_REGISTER;
+    is_zero->operands[2].reg = get_reil_reg_from_scratch_reg(context, output);
+    is_zero->operands[2].size = output->size;
+
+    scratch_register * result = gen_xor_reg_int(context, get_reil_reg_from_scratch_reg(context, output), output->size, 1);
+    gen_storereg_reg(context, get_reil_reg_from_scratch_reg(context, result), result->size, reg2, reg2_size);
+}
+
 static void gen_eflags_update(translation_context * context, reil_operand * op1, reil_operand * op2, reil_operand * op3)
 {
     if (eflags_cross_reference[context->x86instruction->type].ef_cf & EFLAG_MODIFY)
@@ -963,7 +999,7 @@ static void gen_eflags_update(translation_context * context, reil_operand * op1,
 
     if (eflags_cross_reference[context->x86instruction->type].ef_zf & EFLAG_MODIFY)
     {
-        gen_setc_zf(context, op3->reg, op3->size);
+        gen_is_zero(context, op3->reg, op3->size, REG_ZF, EFLAGS_REGISTER_SIZE);
     }
     else if (eflags_cross_reference[context->x86instruction->type].ef_zf & EFLAG_UNDEF)
     {
@@ -1181,7 +1217,6 @@ static void gen_setc_sf(translation_context * context, reil_register reg, size_t
     scratch_register * reduced_output = gen_reduce(context, get_reil_reg_from_scratch_reg(context, anded_output), anded_output->size, EFLAGS_REGISTER_SIZE);
     gen_storereg_reg(context, get_reil_reg_from_scratch_reg(context, reduced_output), reduced_output->size, REG_SF, EFLAGS_REGISTER_SIZE);
 }
-#endif
 
 static void gen_setc_zf(translation_context * context, reil_register reg, size_t reg_size)
 {
@@ -1195,6 +1230,7 @@ static void gen_setc_zf(translation_context * context, reil_register reg, size_t
     bool_is_zero->operands[2].reg = REG_ZF;
     bool_is_zero->operands[2].size = EFLAGS_REGISTER_SIZE;
 }
+#endif
 
 static void calculate_memory_offset(translation_context * context, POPERAND x86operand, int * offset, size_t * offset_size, reil_operand_type * offset_type)
 {
@@ -1688,12 +1724,137 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
 
             gen_storereg_reg(context, get_reil_reg_from_scratch_reg(context, temp), temp->size, quotient, operand_size);
 
-            /* The DIV instruction leaves status registers in undefined state, so we do not
-             * need the access the operands */
+            /* The DIV instruction leaves status registers in an undefined state, so we do not
+             * need to access the operands */
             gen_eflags_update(context, NULL, NULL, NULL);
         }
         else if (context->x86instruction->type == INSTRUCTION_TYPE_MUL)
         {
+            /* The registers used to store the quotient and the remainder depend on the mode and operand size. */
+            size_t operand_size = get_operand_size(context->x86instruction, &context->x86instruction->op1);
+            reil_register multiplicand , multiplier;
+            unsigned char multiplier_is_reg = context->x86instruction->op1.type == OPERAND_TYPE_REGISTER;
+
+            if (!multiplier_is_reg)
+            {
+                int offset;
+                size_t offset_size;
+                reil_operand_type offset_type;
+
+                calculate_memory_offset(context, &context->x86instruction->op1, &offset, &offset_size, &offset_type);
+
+                scratch_register * loaded_multiplier;
+                if ( offset_type == REIL_OPERAND_TYPE_REGISTER )
+                {
+                    loaded_multiplier= gen_load_reg(context, (reil_register)offset, offset_size);
+                }
+                else /* REIL_OPERAND_TYPE_INTEGER */
+                {
+                    loaded_multiplier = gen_load_int(context, (reil_integer)offset, offset_size);
+                }
+                multiplier = get_reil_reg_from_scratch_reg(context, loaded_multiplier);
+            }
+
+            reil_instruction * mul = alloc_reil_instruction(context, REIL_MUL);
+            switch(operand_size)
+            {
+                case 1:
+                    {
+                        multiplicand = X86_REG_AL;
+                        if (multiplier_is_reg)
+                        {
+                            multiplier = get_operand_register(&context->x86instruction->op1) + 16;
+                        }
+
+                        mul->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
+                        mul->operands[0].reg = multiplicand;
+                        mul->operands[0].size = 1;
+                        
+                        mul->operands[1].type = REIL_OPERAND_TYPE_REGISTER;
+                        mul->operands[1].reg = multiplier;
+                        mul->operands[1].size = 1;
+                        
+                        mul->operands[2].type = REIL_OPERAND_TYPE_REGISTER;
+                        mul->operands[2].reg = X86_REG_AX;
+                        mul->operands[2].size = 2;
+
+                        gen_is_not_zero(context, X86_REG_AH, 1, REG_CF, 1);
+                        gen_is_not_zero(context, X86_REG_AH, 1, REG_OF, 1);
+                    }
+                    break;
+                case 2:
+                    {
+                        multiplicand = X86_REG_AX;
+                        if (multiplier_is_reg)
+                        {
+                            multiplier = get_operand_register(&context->x86instruction->op1) + 8;
+                        }
+
+                        mul->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
+                        mul->operands[0].reg = multiplicand;
+                        mul->operands[0].size = 2;
+                        
+                        mul->operands[1].type = REIL_OPERAND_TYPE_REGISTER;
+                        mul->operands[1].reg = multiplier;
+                        mul->operands[1].size = 2;
+                        
+                        scratch_register * product = alloc_scratch_reg(context);
+                        product->size = 4;
+
+                        mul->operands[2].type = REIL_OPERAND_TYPE_REGISTER;
+                        mul->operands[2].reg = get_reil_reg_from_scratch_reg(context, product);
+                        mul->operands[2].size = product->size;
+
+                        scratch_register * high_word = gen_shr_int(context, get_reil_reg_from_scratch_reg(context, product), product->size, 16);
+                        scratch_register * reduced_high_word = gen_reduce(context, get_reil_reg_from_scratch_reg(context, high_word), high_word->size, 2);
+                        gen_storereg_reg(context, get_reil_reg_from_scratch_reg(context, reduced_high_word), reduced_high_word->size, X86_REG_DX, 2);
+                        
+                        scratch_register * low_word = gen_reduce(context, get_reil_reg_from_scratch_reg(context, product), product->size, 2);
+                        gen_storereg_reg(context, get_reil_reg_from_scratch_reg(context, low_word), low_word->size, X86_REG_AX, 2);
+
+                        gen_is_not_zero(context, X86_REG_DX, 2, REG_CF, 1);
+                        gen_is_not_zero(context, X86_REG_DX, 2, REG_OF, 1);
+                    }
+                    break;
+                case 4:
+                    {
+                        multiplicand = X86_REG_EAX;
+                        if (multiplier_is_reg)
+                        {
+                            multiplier = get_operand_register(&context->x86instruction->op1);
+                        }
+
+                        mul->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
+                        mul->operands[0].reg = multiplicand;
+                        mul->operands[0].size = 4;
+                        
+                        mul->operands[1].type = REIL_OPERAND_TYPE_REGISTER;
+                        mul->operands[1].reg = multiplier;
+                        mul->operands[1].size = 4;
+                        
+                        scratch_register * product = alloc_scratch_reg(context);
+                        product->size = 8;
+
+                        mul->operands[2].type = REIL_OPERAND_TYPE_REGISTER;
+                        mul->operands[2].reg = get_reil_reg_from_scratch_reg(context, product);
+                        mul->operands[2].size = product->size;
+
+                        scratch_register * high_dword = gen_shr_int(context, get_reil_reg_from_scratch_reg(context, product), product->size, 32);
+                        scratch_register * reduced_high_dword = gen_reduce(context, get_reil_reg_from_scratch_reg(context, high_dword), high_dword->size, 4);
+                        gen_storereg_reg(context, get_reil_reg_from_scratch_reg(context, reduced_high_dword), reduced_high_dword->size, X86_REG_EDX, 4);
+                        
+                        scratch_register * low_dword = gen_reduce(context, get_reil_reg_from_scratch_reg(context, product), product->size, 4);
+                        gen_storereg_reg(context, get_reil_reg_from_scratch_reg(context, low_dword), low_dword->size, X86_REG_EAX, 4);
+
+                        gen_is_not_zero(context, X86_REG_EDX, 4, REG_CF, 1);
+                        gen_is_not_zero(context, X86_REG_EDX, 4, REG_OF, 1);
+                    }
+                    break;
+                default:
+                    gen_unknown(context);
+                    break;
+            }
+
         }
         else
         {
