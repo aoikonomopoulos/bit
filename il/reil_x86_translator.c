@@ -76,6 +76,16 @@ static const char * x86reg_table[13][8] =
 	{ "??",   "??",   "??",   "??",   "??",   "??",   "??",   "??"   },
 };
 
+#define X86_REG_EAX     0x0
+#define X86_REG_AX      0x8
+#define X86_REG_AL      0x10
+#define X86_REG_AH      0x14 
+
+#define X86_REG_EDX     0x2
+#define X86_REG_DX      0xA
+#define X86_REG_DL      0x12
+#define X86_REG_DH      0x16 
+
 #define EFLAG_NOT_IMPL  0x0
 #define EFLAG_BLANK     0x0
 #define EFLAG_TEST      0x1
@@ -235,6 +245,7 @@ static scratch_register * gen_and_reg_reg(translation_context * context, reil_re
 static scratch_register * gen_and_reg_int(translation_context * context, reil_register reg, size_t reg_size, reil_integer integer);
 static scratch_register * gen_xor_reg_int(translation_context * context, reil_register reg, size_t reg_size, reil_integer integer);
 static scratch_register * gen_xor_reg_reg(translation_context * context, reil_register reg1, size_t reg1_size, reil_register reg2, size_t reg2_size);
+static scratch_register * gen_or_reg_reg(translation_context * context, reil_register reg1, size_t reg1_size, reil_register reg2, size_t reg2_size);
 
 static void gen_eflags_update(translation_context * context, reil_operand * op1, reil_operand * op2, reil_operand * op3);
 
@@ -476,9 +487,9 @@ static void gen_undef(translation_context * context, reil_register reg, size_t r
 {
     reil_instruction * undef = alloc_reil_instruction(context, REIL_UNDEF);
 
-    undef->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
-    undef->operands[0].reg = reg;
-    undef->operands[0].size = reg_size;
+    undef->operands[2].type = REIL_OPERAND_TYPE_REGISTER;
+    undef->operands[2].reg = reg;
+    undef->operands[2].size = reg_size;
 }
 
 static void gen_storereg_reg(translation_context * context, reil_register reg1, size_t reg1_size, reil_register reg2, size_t reg2_size)
@@ -846,6 +857,28 @@ static scratch_register * gen_xor_reg_reg(translation_context * context, reil_re
     xor->operands[2].type = REIL_OPERAND_TYPE_REGISTER;
     xor->operands[2].reg = get_reil_reg_from_scratch_reg(context, output);
     xor->operands[2].size = output->size;
+
+    return output;
+}
+
+static scratch_register * gen_or_reg_reg(translation_context * context, reil_register reg1, size_t reg1_size, reil_register reg2, size_t reg2_size)
+{
+    reil_instruction * or = alloc_reil_instruction(context, REIL_OR);
+
+    or->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
+    or->operands[0].reg = reg1;
+    or->operands[0].size = reg1_size;
+
+    or->operands[1].type = REIL_OPERAND_TYPE_REGISTER;
+    or->operands[1].reg = reg2;
+    or->operands[1].size = reg2_size;
+
+    scratch_register * output = alloc_scratch_reg(context);
+    output->size = MAX(reg1_size, reg2_size);
+
+    or->operands[2].type = REIL_OPERAND_TYPE_REGISTER;
+    or->operands[2].reg = get_reil_reg_from_scratch_reg(context, output);
+    or->operands[2].size = output->size;
 
     return output;
 }
@@ -1534,6 +1567,138 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
         gen_eflags_update(context, op1, op2, &op3);
 
         gen_store_reg_reg(context, offset, offset_size, op3.reg, op3.size);
+    }
+    /* The (I)MUL and (I)DIV instructions take one operand. */
+    else if ((context->x86instruction->op1.type == OPERAND_TYPE_REGISTER || 
+               context->x86instruction->op1.type == OPERAND_TYPE_MEMORY) && context->x86instruction->op2.type == OPERAND_TYPE_NONE)
+    {
+        if (context->x86instruction->type == INSTRUCTION_TYPE_DIV)
+        {
+            /* The registers used to store the quotient and the remainder depend on the mode and operand size. */
+            size_t operand_size = get_operand_size(context->x86instruction, &context->x86instruction->op1);
+            reil_register dividend, divider, quotient, remainder;
+            unsigned char divider_is_reg = context->x86instruction->op1.type == OPERAND_TYPE_REGISTER;
+
+            if (!divider_is_reg)
+            {
+                int offset;
+                size_t offset_size;
+                reil_operand_type offset_type;
+
+                calculate_memory_offset(context, &context->x86instruction->op1, &offset, &offset_size, &offset_type);
+
+                scratch_register * loaded_divider;
+                if ( offset_type == REIL_OPERAND_TYPE_REGISTER )
+                {
+                    loaded_divider  = gen_load_reg(context, (reil_register)offset, offset_size);
+                }
+                else /* REIL_OPERAND_TYPE_INTEGER */
+                {
+                    loaded_divider = gen_load_int(context, (reil_integer)offset, offset_size);
+                }
+                divider = get_reil_reg_from_scratch_reg(context, loaded_divider);
+            }
+
+            switch(operand_size)
+            {
+                case 1:
+                    {
+                        dividend = X86_REG_AX;
+                        if (divider_is_reg)
+                        {
+                            divider = get_operand_register(&context->x86instruction->op1) + 16;
+                        }
+
+                        quotient = X86_REG_AL;
+                        remainder = X86_REG_AH;
+                    }
+                    break;
+                case 2:
+                    {
+                        if (divider_is_reg)
+                        {
+                            divider = get_operand_register(&context->x86instruction->op1) + 8;
+                        }
+
+                        scratch_register * highpart_dividend = alloc_scratch_reg(context);
+                        highpart_dividend->size = 4;
+                        gen_storereg_reg(context, X86_REG_DX, 2, get_reil_reg_from_scratch_reg(context, highpart_dividend), highpart_dividend->size);
+                        scratch_register * shifter_highpart_dividend = gen_shr_int(context, get_reil_reg_from_scratch_reg(context, highpart_dividend),
+                                highpart_dividend->size, 16);
+                        scratch_register * complete_dividend = gen_or_reg_reg(context, get_reil_reg_from_scratch_reg(context, shifter_highpart_dividend),
+                                shifter_highpart_dividend->size, X86_REG_AX, 2);
+
+                        dividend = get_reil_reg_from_scratch_reg(context, complete_dividend);
+                        quotient = X86_REG_AX;
+                        remainder = X86_REG_DX;
+                    }
+                    break;
+                case 4:
+                    {
+                        if (divider_is_reg)
+                        {
+                            divider = get_operand_register(&context->x86instruction->op1);
+                        }
+
+                        scratch_register * highpart_dividend = alloc_scratch_reg(context);
+                        highpart_dividend->size = 8;
+                        gen_storereg_reg(context, X86_REG_EDX, 4, get_reil_reg_from_scratch_reg(context, highpart_dividend), highpart_dividend->size);
+                        scratch_register * shifter_highpart_dividend = gen_shr_int(context, get_reil_reg_from_scratch_reg(context, highpart_dividend),
+                                highpart_dividend->size, 32);
+                        scratch_register * complete_dividend = gen_or_reg_reg(context, get_reil_reg_from_scratch_reg(context, shifter_highpart_dividend),
+                                shifter_highpart_dividend->size, X86_REG_EAX, 4);
+
+                        dividend = get_reil_reg_from_scratch_reg(context, complete_dividend);
+                        quotient = X86_REG_EAX;
+                        remainder = X86_REG_EDX;
+                    }
+                    break;
+                default:
+                    break;
+            }
+
+            reil_instruction * div = alloc_reil_instruction(context, REIL_DIV);
+            div->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
+            div->operands[0].reg = dividend;
+            div->operands[0].size = 2*operand_size;
+            
+            div->operands[1].type = REIL_OPERAND_TYPE_REGISTER;
+            div->operands[1].reg = divider;
+            div->operands[1].size = operand_size;
+
+            scratch_register * temp = alloc_scratch_reg(context);
+            temp->size = operand_size;
+            
+            div->operands[2].type = REIL_OPERAND_TYPE_REGISTER;
+            div->operands[2].reg = get_reil_reg_from_scratch_reg(context, temp);
+            div->operands[2].size = temp->size;
+            
+            reil_instruction * mod = alloc_reil_instruction(context, REIL_MOD);
+            mod->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
+            mod->operands[0].reg = dividend;
+            mod->operands[0].size = 2*operand_size;
+            
+            mod->operands[1].type = REIL_OPERAND_TYPE_REGISTER;
+            mod->operands[1].reg = divider;
+            mod->operands[1].size = operand_size;
+            
+            mod->operands[2].type = REIL_OPERAND_TYPE_REGISTER;
+            mod->operands[2].reg = remainder;
+            mod->operands[2].size = operand_size;
+
+            gen_storereg_reg(context, get_reil_reg_from_scratch_reg(context, temp), temp->size, quotient, operand_size);
+
+            /* The DIV instruction leaves status registers in undefined state, so we do not
+             * need the access the operands */
+            gen_eflags_update(context, NULL, NULL, NULL);
+        }
+        else if (context->x86instruction->type == INSTRUCTION_TYPE_MUL)
+        {
+        }
+        else
+        {
+            gen_unknown(context);
+        }
     }
     else
     {
