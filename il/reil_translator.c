@@ -30,9 +30,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <libdasm.h>
+#include <reil_x86.h>
 #include "reil.h"
-#include <reil_x86_translator.h>
 
 void usage(const char * progname);
 unsigned char * read_file(size_t *len, char *name);
