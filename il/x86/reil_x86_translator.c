@@ -28,10 +28,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <reil.h>
+#include <reil_instruction_table.h>
 #include "libdasm.h"
 #include "opcode_tables.h"
-#include "reil.h"
-#include "reil_instruction_table.h"
 #include "reil_x86_translator.h"
 
 /* Check for address/operand size override, copied from libdasm.c */
