@@ -3,8 +3,6 @@ objects=$(sources:.c=.o)
 dependencies=$(sources:.c=.d)
 library=libreilx86.a
 
-CFLAGS+=-I..
-
 all: $(library)
 
 # Include generated dependencies

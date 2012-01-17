@@ -1,5 +1,5 @@
-CC=gcc
-CFLAGS=-Wall -g -O0 -Ix86
+export CC=clang
+export CFLAGS=-std=gnu99 -Wall -Wextra -Wno-missing-field-initializers -g -O0
 LDFLAGS=-Lx86 -lreilx86
 
 sources=reil_translator.c reil.c 
@@ -15,7 +15,7 @@ all: $(program) $(submodules)
 include $(sources:.c=.d)
 
 $(program): $(objects) $(translators)
-	$(CC) $(LDFLAGS) $(objects) -o $(program)
+	$(CC) -o $(program) $(objects) $(LDFLAGS) 
 
 .PHONY : translators $(translators) 
 translators: $(translators)
