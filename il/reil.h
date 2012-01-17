@@ -69,9 +69,23 @@ typedef enum _reil_instruction_index
     REIL_NOP
 } reil_instruction_index;
 
-typedef int reil_integer;
-typedef int reil_register;
-typedef int reil_subaddress;
+typedef struct
+{
+    int value;
+    size_t size;
+} reil_integer;
+
+typedef struct
+{
+    unsigned int index;
+    size_t size;
+} reil_register;
+
+typedef struct
+{
+    unsigned int offset;
+    unsigned char relative_offset;
+} reil_subaddress;
 
 typedef enum _reil_operand_type
 {
@@ -110,8 +124,6 @@ typedef struct _reil_operand
         reil_register reg;
         reil_subaddress subaddress;
     };
-    /* Size in bytes (e.g. 1, 2, and 4 bytes ); */
-    unsigned char size;
     reil_operand_flags flags;
 } reil_operand;
 
