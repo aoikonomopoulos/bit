@@ -4,6 +4,7 @@ LDFLAGS=-Lx86 -lreilx86
 
 sources=reil_translator.c reil.c 
 objects=$(sources:.c=.o)
+dependencies=$(sources:.c=.d)
 program=reil_translator
 
 submodules=tests
@@ -12,7 +13,7 @@ translators=x86
 all: $(program) $(submodules) 
 
 # Include generated dependencies
-include $(sources:.c=.d)
+include $(dependencies)
 
 $(program): $(objects) $(translators)
 	$(CC) -o $(program) $(objects) $(LDFLAGS) 
@@ -38,7 +39,7 @@ $(submodules):
 
 .PHONY: clean
 clean:
-	rm -f $(objects) $(sources:.c=.d) $(program)
+	rm -f $(objects) $(dependencies) $(program)
 	@for translator in $(translators); do \
 		$(MAKE) -C $$translator clean; \
 	done
