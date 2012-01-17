@@ -30,7 +30,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <reil_x86.h>
+#include "x86/reil_x86.h"
 #include "reil.h"
 
 void usage(const char * progname);
@@ -57,7 +57,7 @@ int main(int argc, char** argv)
             get_instruction_string(&x86_instruction, FORMAT_INTEL, c, x86_instruction_string,
                     sizeof(x86_instruction_string));
 
-            reil_instructions * instructions = reil_translate(base, offset++, &x86_instruction);
+            reil_instructions * instructions = reil_translate_from_x86(base, offset++, &x86_instruction);
             for ( i = 0; i < instructions->size; i++)
             {
                 reil_instruction * instruction = &instructions->instruction[i];
