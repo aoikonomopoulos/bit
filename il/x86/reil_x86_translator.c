@@ -28,8 +28,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <reil.h>
-#include <reil_instruction_table.h>
+#include "../reil.h"
+#include "../reil_instruction_table.h"
 #include "libdasm.h"
 #include "opcode_tables.h"
 #include "reil_x86_translator.h"
@@ -255,7 +255,7 @@ static void gen_eflags_update(translation_context * context, reil_operand * op1,
 /* REIL instruction group generation functions */
 static void gen_arithmetic_instr(translation_context * context, reil_instruction_index index);
 
-reil_instructions * reil_translate(unsigned long base, unsigned long offset, INSTRUCTION * x86instruction)
+reil_instructions * reil_translate_from_x86(unsigned long base, unsigned long offset, INSTRUCTION * x86instruction)
 {
     translation_context context;
     init_translation_context(&context, x86instruction, base, offset);
