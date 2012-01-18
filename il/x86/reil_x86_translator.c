@@ -192,11 +192,6 @@ static reil_register REG_ZF = { .index = EFLAGS_REGISTER_BASE + 6, .size = EFLAG
 static reil_register REG_SF = { .index = EFLAGS_REGISTER_BASE + 7, .size = EFLAGS_REGISTER_SIZE};
 static reil_register REG_OF = { .index = EFLAGS_REGISTER_BASE + 11, .size = EFLAGS_REGISTER_SIZE};
 
-typedef struct _scratch_register
-{
-    size_t size;
-} scratch_register;
-
 typedef struct _translation_context
 {
     /* The instruction being translated */
@@ -210,20 +205,37 @@ typedef struct _translation_context
     /* Last reil instruction offset */
     size_t last_offset;
     size_t next_free_register;
-    reil_register scratch_registers[MAX_SCRATCH_REGISTERS];
 } translation_context;
 
-static size_t get_operand_size(INSTRUCTION * x86instruction, OPERAND * x86operand);
+typedef enum 
+{
+    INTEGER_OFFSET,
+    REGISTER_OFFSET
+} memory_offset_type;
+
+typedef struct
+{
+    memory_offset_type type;
+    union
+    {
+        reil_register reg;
+        reil_integer integer;
+    };
+} memory_offset;
+
+static size_t get_x86operand_size(INSTRUCTION * x86instruction, OPERAND * x86operand);
+static void get_x86operand_basereg(PINSTRUCTION x86instruction, POPERAND x86operand, reil_register * base);
+static void get_x86operand_indexreg(PINSTRUCTION x86instruction, POPERAND x86operand, reil_register * index);
 static void init_translation_context(translation_context * context, INSTRUCTION * x86instruction, unsigned long base, unsigned long offset);
+static void calculate_memory_offset(translation_context * context, POPERAND x86operand, memory_offset * offset);
 static void alloc_temp_reg(translation_context * context, size_t size, reil_register * temp_reg);
-static void calculate_memory_offset(translation_context * context, POPERAND x86operand, int * offset, size_t * offset_size, reil_operand_type * offset_type);
 static reil_instruction * alloc_reil_instruction(translation_context * context, reil_instruction_index index);
-static reil_register get_reil_reg_from_scratch_reg(translation_context * context, scratch_register * reg);
-static scratch_register * get_scratch_reg_from_reil_reg(translation_context * context, reil_register reg);
-static reil_register x86regop_to_reilreg(translation_context * context, POPERAND op);
+static void get_reil_reg_from_x86_op(translation_context * context, POPERAND op, reil_register * reg);
+static unsigned char get_reil_int_from_x86_op(translation_context * context, POPERAND op, reil_integer * integer);
 
 static void assign_operand_register(reil_operand * operand, reil_register * reg);
 static void assign_operand_integer(reil_operand * operand, reil_integer * integer);
+static void assign_reg_reg(reil_register * src, reil_register * dest);
 
 /* Basic REIL instruction generation functions */
 static void gen_unknown(translation_context * context);
@@ -303,73 +315,61 @@ reil_instructions * reil_translate_from_x86(unsigned long base, unsigned long of
             {
                 if ( x86instruction->op1.type == OPERAND_TYPE_REGISTER && x86instruction->op2.type == OPERAND_TYPE_REGISTER)
                 {
-                    reil_register src = {.index = x86regop_to_reilreg(&context, &x86instruction->op2),
-                    .size = get_operand_size(x86instruction, &x86instruction->op2)};
-                    reil_register dst = {.index = x86regop_to_reilreg(&context, &x86instruction->op1),
-                    .size = get_operand_size(x86instruction, &x86instruction->op1)};
-                    gen_mov_reg_reg(&context, &src, &dst);
+                    reil_register src, dest;
+                    get_reil_reg_from_x86_op(&context, &x86instruction->op2, &src);
+                    get_reil_reg_from_x86_op(&context, &x86instruction->op1, &dest);
+                    gen_mov_reg_reg(&context, &src, &dest);
                 }
                 else if ( x86instruction->op1.type == OPERAND_TYPE_MEMORY && x86instruction->op2.type == OPERAND_TYPE_REGISTER)
                 {
-                    int offset;
-                    size_t offset_size;
-                    reil_operand_type offset_type;
+                    memory_offset offset;
+                    calculate_memory_offset(&context, &x86instruction->op1, &offset);
 
-                    calculate_memory_offset(&context, &x86instruction->op1, &offset, &offset_size, &offset_type);
-
-                    if ( offset_type == REIL_OPERAND_TYPE_REGISTER )
+                    if ( offset.type == REGISTER_OFFSET )
                     {
-                        reil_register value = {.index = x86regop_to_reilreg(&context, &x86instruction->op2),
-                        .size = get_operand_size(x86instruction, &x86instruction->op2)};
-                        reil_register address = {.index = offset, .size = offset_size };
-                        gen_store_reg_reg(&context, &value, &address);
+                        reil_register value; 
+                        get_reil_reg_from_x86_op(&context, &x86instruction->op2, &value);
+                        gen_store_reg_reg(&context, &value, &offset.reg);
                     }
-                    else /* REIL_OPERAND_TYPE_INTEGER */
+                    else /* INTEGER_OFFSET */
                     {
-                        reil_register value = {.index = x86regop_to_reilreg(&context, &x86instruction->op2),
-                        .size = get_operand_size(x86instruction, &x86instruction->op2)};
-                        reil_integer address = {.value = offset, .size = offset_size};
-                        gen_store_reg_int(&context, &value, &address);
+                        reil_register value; 
+                        get_reil_reg_from_x86_op(&context, &x86instruction->op2, &value);
+                        gen_store_reg_int(&context, &value, &offset.integer);
                     }
                 }
                 else if ( x86instruction->op1.type == OPERAND_TYPE_REGISTER && x86instruction->op2.type == OPERAND_TYPE_MEMORY)
                 {
-                    int offset;
-                    size_t offset_size;
-                    reil_operand_type offset_type;
+                    memory_offset offset;
+                    calculate_memory_offset(&context, &x86instruction->op2, &offset);
 
-                    calculate_memory_offset(&context, &x86instruction->op2, &offset, &offset_size, &offset_type);
-
-                    if ( offset_type == REIL_OPERAND_TYPE_REGISTER )
+                    if ( offset.type == REGISTER_OFFSET )
                     {
-                        reil_register address = {.index = offset, .size = offset_size};
                         reil_register value = {.index = 0, .size = 0};
-                        gen_load_reg_reg(&context, &address, &value);
+                        gen_load_reg_reg(&context, &offset.reg, &value);
 
-                        reil_register dst = {.index = x86regop_to_reilreg(&context, &x86instruction->op1),
-                        .size = get_operand_size(x86instruction, &x86instruction->op1)};
-                        gen_mov_reg_reg(&context, &value, &dst);
+                        reil_register dest;
+                        get_reil_reg_from_x86_op(&context, &x86instruction->op1, &dest);
+                        gen_mov_reg_reg(&context, &value, &dest);
                     }
-                    else /* REIL_OPERAND_TYPE_INTEGER */
+                    else /* INTEGER_OFFSET */
                     {
-                        reil_integer address = {.value = offset, .size = offset_size};
                         reil_register value = {.index = 0, .size = 0};
-                        gen_load_int_reg(&context, &address, &value);
-                        reil_register dest = {.index = x86regop_to_reilreg(&context, &x86instruction->op1),
-                        .size = get_operand_size(x86instruction, &x86instruction->op1)};
+                        gen_load_int_reg(&context, &offset.integer, &value);
+                        reil_register dest;
+                        get_reil_reg_from_x86_op(&context, &x86instruction->op1, &dest);
                         gen_mov_reg_reg(&context, &value, &dest);
                     }
 
                 }
                 else if ( x86instruction->op1.type == OPERAND_TYPE_REGISTER && x86instruction->op2.type == OPERAND_TYPE_IMMEDIATE)
                 {
-                    unsigned int imm;
-                    if ( get_operand_immediate(&x86instruction->op2, &imm) )
+                    reil_integer immediate;
+                    if ( get_reil_int_from_x86_op(&context, &x86instruction->op2, &immediate) )
                     {
-                        reil_integer src = {.value = imm, .size = get_operand_size(x86instruction, &x86instruction->op2)};
-                        reil_register dest = {.index = x86regop_to_reilreg(&context, &x86instruction->op1),
-                        .size = get_operand_size(x86instruction, &x86instruction->op1)};
-                        gen_mov_int_reg(&context, &src, &dest);
+                        reil_register dest;
+                        get_reil_reg_from_x86_op(&context, &x86instruction->op1, &dest);
+                        gen_mov_int_reg(&context, &immediate, &dest);
                     }
                     else
                     {
@@ -435,7 +435,7 @@ reil_instructions * reil_translate_from_x86(unsigned long base, unsigned long of
     return instructions;
 }
 
-size_t get_operand_size(INSTRUCTION * x86instruction, OPERAND * x86operand)
+size_t get_x86operand_size(INSTRUCTION * x86instruction, OPERAND * x86operand)
 {
     size_t size = 0;
     switch (MASK_OT(x86operand->flags)) {
@@ -456,6 +456,34 @@ size_t get_operand_size(INSTRUCTION * x86instruction, OPERAND * x86operand)
             break;
     }
     return size;
+}
+
+static void get_x86operand_basereg(PINSTRUCTION x86instruction, POPERAND x86operand, reil_register * base)
+{
+    int basereg = get_operand_basereg(x86operand);
+    if ( basereg == REG_NOP )
+    {
+        base->size = 0;
+        return;
+    }
+    base->index = (REG_GEN_DWORD << 3) + basereg;
+    /* Use the size of the operand for the correct size, instead of using
+     * the size of the register. */
+    base->size = get_x86operand_size(x86instruction, x86operand);
+}
+
+static void get_x86operand_indexreg(PINSTRUCTION x86instruction, POPERAND x86operand, reil_register * index)
+{
+    int indexreg = get_operand_indexreg(x86operand);
+    if ( indexreg == REG_NOP )
+    {
+        index->size = 0;
+        return;
+    }
+    index->index = (REG_GEN_DWORD << 3) + indexreg;
+    /* Use the size of the operand for the correct size, instead of using
+     * the size of the register. */
+    index->size = get_x86operand_size(x86instruction, x86operand);
 }
 
 static void init_translation_context(translation_context * context, INSTRUCTION * x86instruction, unsigned long base, unsigned long offset)
@@ -496,15 +524,15 @@ static void gen_undef_reg(translation_context * context, reil_register * reg)
 {
     reil_instruction * undef = alloc_reil_instruction(context, REIL_UNDEF);
 
-    assign_operand_register(&undef->operand[2], reg);
+    assign_operand_register(&undef->operands[2], reg);
 }
 
 static void gen_mov_reg_reg(translation_context * context, reil_register * src, reil_register * dest)
 {
     reil_instruction * store_instruction = alloc_reil_instruction(context, REIL_STR);
 
-    assign_operand_register(&store_instruction->operand[0], src);
-    assign_operand_register(&store_instruction->operand[2], dst);
+    assign_operand_register(&store_instruction->operands[0], src);
+    assign_operand_register(&store_instruction->operands[2], dest);
 }
 
 static void gen_mov_int_reg(translation_context * context, reil_integer * src, reil_register * dest)
@@ -517,13 +545,13 @@ static void gen_mov_int_reg(translation_context * context, reil_integer * src, r
 
 static void gen_set_reg(translation_context * context , reil_register * reg)
 {
-    reil_integer one = {.value = 1, size = reg->size};
+    reil_integer one = {.value = 1, .size = reg->size};
     gen_mov_int_reg(context, &one, reg);
 }
 
 static void gen_reset_reg(translation_context * context , reil_register * reg)
 {
-    reil_integer zero = {.value = 0, size = reg->size};
+    reil_integer zero = {.value = 0, .size = reg->size};
     gen_mov_int_reg(context, &zero, reg);
 }
 
@@ -549,7 +577,7 @@ static void gen_load_reg_reg(translation_context * context, reil_register * addr
 
     assign_operand_register(&load_instruction->operands[0], address);
 
-    if ( !value->index && !value->size )
+    if ( !value->size )
     {
         alloc_temp_reg(context, address->size, value);
     }
@@ -562,7 +590,7 @@ static void gen_load_int_reg(translation_context * context, reil_integer * addre
 
     assign_operand_integer(&load_instruction->operands[0], address);
     
-    if ( !value->index && !value->size )
+    if ( !value->size )
     {
         alloc_temp_reg(context, address->size, value);
     }
@@ -576,7 +604,7 @@ static void gen_add_reg_int_reg(translation_context * context, reil_register * a
     assign_operand_register(&add_instruction->operands[0], addend1);
     assign_operand_integer(&add_instruction->operands[1], addend2);
 
-    if ( !result->index && !result->size )
+    if ( !result->size )
     {
         alloc_temp_reg(context, 2 * MAX(addend1->size, addend2->size), result);
     }
@@ -590,7 +618,7 @@ static void gen_add_reg_reg_reg(translation_context * context, reil_register * a
     assign_operand_register(&add_instruction->operands[0], addend1);
     assign_operand_register(&add_instruction->operands[1], addend2);
 
-    if ( !result->index && !result->size )
+    if ( !result->size )
     {
         alloc_temp_reg(context, 2 * MAX(addend1->size, addend2->size), result);
     }
@@ -604,11 +632,11 @@ static void gen_multiply_reg_int_reg(translation_context * context, reil_registe
     assign_operand_register(&multiply_instruction->operands[0], multiplicand);
     assign_operand_integer(&multiply_instruction->operands[1], multiplier);
 
-    if ( !result->index && !result->size )
+    if ( !result->size )
     {
         alloc_temp_reg(context,2 * MAX(multiplicand->size, multiplier->size), result);
     }
-    assign_operand_register(&add_instruction->operands[2], result);
+    assign_operand_register(&multiply_instruction->operands[2], result);
 }
 
 static void gen_reduce_reg_int_reg(translation_context * context, reil_register * reg, reil_integer * size, reil_register * result)
@@ -633,7 +661,7 @@ static void gen_shx_reg_int_reg(translation_context * context, reil_instruction_
     assign_operand_register(&shift->operands[0], src);
     assign_operand_integer(&shift->operands[1], shifts);
 
-    if ( !result->index && !result->size )
+    if ( !result->size )
     {
         alloc_temp_reg(context, src->size, result);
     }
@@ -642,12 +670,12 @@ static void gen_shx_reg_int_reg(translation_context * context, reil_instruction_
 
 static void gen_shx_reg_reg_reg(translation_context * context, reil_instruction_index shift_op, reil_register * src, reil_register * shifts, reil_register * result)
 {
-    reil_instruction * shift = alloc_reil_instruction(context, shift_index);
+    reil_instruction * shift = alloc_reil_instruction(context, shift_op);
 
     assign_operand_register(&shift->operands[0], src);
     assign_operand_register(&shift->operands[1], shifts);
 
-    if ( !result->index && !result->size )
+    if ( !result->size )
     {
         alloc_temp_reg(context, src->size, result);
     }
@@ -669,7 +697,7 @@ static void gen_shl_reg_reg_reg(translation_context * context, reil_register * s
     return gen_shx_reg_reg_reg(context, REIL_LSH, src, shifts, result);
 }
 
-static void gen_shr_reg_reg_reg(translation_context * context, reil_register * src, reil_register * shifts, reil_register * result);
+static void gen_shr_reg_reg_reg(translation_context * context, reil_register * src, reil_register * shifts, reil_register * result)
 {
     return gen_shx_reg_reg_reg(context, REIL_RSH, src, shifts, result);
 }
@@ -698,7 +726,7 @@ static void gen_and_reg_int_reg(translation_context * context, reil_register * r
 
     if (!result->index && !result->size)
     {
-        alloc_temp_reg(context, MAX(reg1->size, reg2->size), result);
+        alloc_temp_reg(context, reg->size, result);
     }
 
     assign_operand_register(&and->operands[2], result);
@@ -716,7 +744,7 @@ static void gen_xor_reg_int_reg(translation_context * context, reil_register * i
         alloc_temp_reg(context, input1->size, result);
     }
     
-    assign_operand_register(xor->operands[2], result);
+    assign_operand_register(&xor->operands[2], result);
 }
 
 static void gen_xor_reg_reg_reg(translation_context * context, reil_register * input1, reil_register * input2, reil_register * result)
@@ -731,7 +759,7 @@ static void gen_xor_reg_reg_reg(translation_context * context, reil_register * i
         alloc_temp_reg(context, MAX(input1->size, input2->size), result);
     }
     
-    assign_operand_register(xor->operands[2], result);
+    assign_operand_register(&xor->operands[2], result);
 }
 
 static void gen_or_reg_reg_reg(translation_context * context, reil_register * input1, reil_register * input2, reil_register * result)
@@ -746,7 +774,7 @@ static void gen_or_reg_reg_reg(translation_context * context, reil_register * in
         alloc_temp_reg(context, MAX(input1->size, input2->size), result);
     }
     
-    assign_operand_register(or->operands[2], result);
+    assign_operand_register(&or->operands[2], result);
 }
 
 static void gen_is_zero_reg_reg(translation_context * context, reil_register * input, reil_register * output)
@@ -764,9 +792,9 @@ static void gen_is_not_zero_reg_reg(translation_context * context, reil_register
     assign_operand_register(&is_zero->operands[0], input);
 
     reil_register temp_output;
-    alloc_temp_reg(context, reg2_size, &temp_output);
+    alloc_temp_reg(context, output->size, &temp_output);
     
-    assign_operand_register(&is_zero->operands[2], temp_output);
+    assign_operand_register(&is_zero->operands[2], &temp_output);
 
     reil_integer mask= {.value = 1, .size = 1};
     reil_register xor_result = {.index = 0, .size = 0};
@@ -778,15 +806,14 @@ static void gen_eflags_update(translation_context * context, reil_operand * op1,
 {
     if (eflags_cross_reference[context->x86instruction->type].ef_cf & EFLAG_MODIFY)
     {
-        reil_register src = {.index = op3->reg, .size = op3->size };
-        reil_integer shifts = {.value = (src.size << 2) - 1, .size = 1};
-        reil_register shifted_src = {.index = 0, .size = 0};
-        gen_shr_reg_int_reg(context, &src, &shifts, &shifted_src);
+        reil_integer shifts = {.value = (op3->reg.size << 2) - 1, .size = 1};
+        reil_register shifted = {.index = 0, .size = 0};
+        gen_shr_reg_int_reg(context, &op3->reg, &shifts, &shifted);
 
         reil_integer size = {.value = EFLAGS_REGISTER_SIZE, .size = 1};
         reil_register carry;
 
-        gen_reduce_reg_int_reg(context, &shifted_src, &size, &carry);
+        gen_reduce_reg_int_reg(context, &shifted, &size, &carry);
         gen_mov_reg_reg(context, &carry, &REG_CF);
     }
     else if (eflags_cross_reference[context->x86instruction->type].ef_cf & EFLAG_UNDEF)
@@ -811,10 +838,9 @@ static void gen_eflags_update(translation_context * context, reil_operand * op1,
     if (eflags_cross_reference[context->x86instruction->type].ef_pf & EFLAG_MODIFY)
     {
         /* Get the least-significant byte of the result */
-        reil_register to_reduced_reg = {.index = op3->reg, .size = op3->size};
-        reil_integer size = {.value = 1, .size = 1};
+        reil_integer lsb_size = {.value = 1, .size = 1};
         reil_register lsb;
-        gen_reduce_reg_int_reg(context, &to_reduced_reg, &size, &lsb);
+        gen_reduce_reg_int_reg(context, &op3->reg, &lsb_size, &lsb);
         /* Shift the lsb by four bytes */
         reil_integer shifts = {.value = 4, .size = 1};
         reil_register shifted_lsb = {.index = 0, .size = 0};
@@ -830,19 +856,19 @@ static void gen_eflags_update(translation_context * context, reil_operand * op1,
         reil_register parity_lookup_table;
         alloc_temp_reg(context, 2, &parity_lookup_table);
 
-        reil_integer src1 = {.value = 0x6996, .size = 2};
-        gen_mov_int_reg(context, &src1, &parity_lookup_table);
+        reil_integer parity_lookup_table_value = {.value = 0x6996, .size = 2};
+        gen_mov_int_reg(context, &parity_lookup_table_value, &parity_lookup_table);
         /* Lookup the parity value in the lookup table */
         reil_register parity_lookup_table_entry = {.index = 0, .size = 0};
-        gen_shr_reg_reg_reg(context, &dest, &parity_index, &parity_lookup_table_entry);
+        gen_shr_reg_reg_reg(context, &parity_lookup_table, &parity_index, &parity_lookup_table_entry);
 
         reil_integer parity_mask = {.value = 1, .size = 1};
         reil_register parity = {.index = 0, .size = 0};
         gen_and_reg_int_reg(context, &parity_lookup_table_entry, &parity_mask, &parity);
 
-        reil_integer size = {.value = EFLAGS_REGISTER_SIZE, .size = 1};
+        reil_integer eflags_reg_size = {.value = EFLAGS_REGISTER_SIZE, .size = 1};
         reil_register reduced_parity;
-        gen_reduce_reg_int_reg(context, &parity, &size, &reduced_parity);
+        gen_reduce_reg_int_reg(context, &parity, &eflags_reg_size, &reduced_parity);
 
         gen_mov_reg_reg(context, &reduced_parity, &REG_PF);
     }
@@ -877,8 +903,7 @@ static void gen_eflags_update(translation_context * context, reil_operand * op1,
 
     if (eflags_cross_reference[context->x86instruction->type].ef_zf & EFLAG_MODIFY)
     {
-        reil_register input = {.index = op3->reg, .size = op3->size};
-        gen_is_zero_reg_reg(context, &input, &REG_ZF);
+        gen_is_zero_reg_reg(context, &op3->reg, &REG_ZF);
     }
     else if (eflags_cross_reference[context->x86instruction->type].ef_zf & EFLAG_UNDEF)
     {
@@ -896,10 +921,9 @@ static void gen_eflags_update(translation_context * context, reil_operand * op1,
     if (eflags_cross_reference[context->x86instruction->type].ef_sf & EFLAG_MODIFY)
     {
         /* Shift the MSB to the LSB */
-        reil_register to_shift_reg = {.index = op3->reg, .size = op3->size};
-        reil_integer shifts = {.value = (to_shift_reg->size << 3) - 1, .size = 1};
+        reil_integer shifts = {.value = (op3->reg.size << 3) - 1, .size = 1};
         reil_register sign_status = {.index = 0, .size = 0};
-        gen_shr_reg_int_reg(context, &to_shift_reg, &shifts, &sign_status);
+        gen_shr_reg_int_reg(context, &op3->reg, &shifts, &sign_status);
 
         reil_integer size = {.value = EFLAGS_REGISTER_SIZE, .size = 1};
         reil_register sign_flag;
@@ -950,38 +974,31 @@ static void gen_eflags_update(translation_context * context, reil_operand * op1,
             reil_register xored_inputs = {.index = 0, .size = 0};
             if ( op2->type == REIL_OPERAND_TYPE_REGISTER )
             {
-                reil_register to_xor_reg = {.index = op1->reg, .size = op1->size };
-                reil_register mask = {.index = op2->reg, .size = op2->size};
-
-                gen_xor_reg_reg_reg(context, &to_xor_reg, &mask, &xored_inputs);
+                gen_xor_reg_reg_reg(context, &op1->reg, &op2->reg, &xored_inputs);
             }
             else /* REIL_OPERAND_TYPE_INTEGER */
             {
-                reil_register to_xor_reg = {.index = op1->reg, .size = op1->size };
-                reil_integer mask = {.value = op2->integer, .size = to_xor_reg->size};
-                gen_xor_reg_int_reg(context, &to_xor_reg, &mask, &xored_inputs);
+                gen_xor_reg_int_reg(context, &op1->reg, &op2->integer, &xored_inputs);
             }
 
-            reil_integer mask = {.value = -1, .size = xored_inputs->size};
+            reil_integer mask = {.value = -1, .size = xored_inputs.size};
             reil_register neg_xored_inputs = {.index = 0, .size = 0};
             gen_xor_reg_int_reg(context, &xored_inputs, &mask, &neg_xored_inputs);
 
-            reil_register to_xor_reg = {.index = op1->reg, .size = op1->size };
-            reil_register mask = {.index = op3->reg, .size = op3->size};
             reil_register xored_input1_output = {.index = 0, .size = 0};
-            gen_xor_reg_reg_reg(context, &to_xor_reg, &mask, &xored_input1_output);
+            gen_xor_reg_reg_reg(context, &op1->reg, &op3->reg, &xored_input1_output);
 
             reil_register anded_result = {.index = 0, .size = 0};
             gen_and_reg_reg_reg(context, &neg_xored_inputs, &xored_input1_output, &anded_result);
 
             /* The value of the OF flag is now in the sign bit of the anded result */
-            reil_integer shifts = {.value = (anded_result->size << 3) - 1, .size = 1};
+            reil_integer shifts = {.value = (anded_result.size << 3) - 1, .size = 1};
             reil_register overflow_status = {.index = 0, .size = 0};
             gen_shr_reg_int_reg(context, &anded_result, &shifts, &overflow_status);
 
             /* Reduce the size */
             reil_integer size = {.value = EFLAGS_REGISTER_SIZE, .size = 1};
-            reil_register overflow_flag;
+            reil_register overflow_flag = {0};
             gen_reduce_reg_int_reg(context, &overflow_status, &size, &overflow_flag);
 
             gen_mov_reg_reg(context, &overflow_flag, &REG_OF);
@@ -1016,35 +1033,28 @@ static void gen_eflags_update(translation_context * context, reil_operand * op1,
             reil_register xored_inputs = {.index = 0, .size = 0};
             if ( op2->type == REIL_OPERAND_TYPE_REGISTER )
             {
-                reil_register to_xor_reg = {.index = op1->reg, .size = op1->size };
-                reil_register mask = {.index = op2->reg, .size = op2->size};
-
-                gen_xor_reg_reg_reg(context, &to_xor_reg, &mask, &xored_inputs);
+                gen_xor_reg_reg_reg(context, &op1->reg, &op2->reg, &xored_inputs);
             }
             else /* REIL_OPERAND_TYPE_INTEGER */
             {
-                reil_register to_xor_reg = {.index = op1->reg, .size = op1->size };
-                reil_integer mask = {.value = op2->integer, .size = to_xor_reg->size};
-                gen_xor_reg_int_reg(context, &to_xor_reg, &mask, &xored_inputs);
+                gen_xor_reg_int_reg(context, &op1->reg, &op2->integer, &xored_inputs);
             }
 
-            reil_register to_xor_reg = {.index = op1->reg, .size = op1->size };
-            reil_register mask = {.index = op3->reg, .size = op3->size};
             reil_register xored_input1_output = {.index = 0, .size = 0};
-            gen_xor_reg_reg_reg(context, &to_xor_reg, &mask, &xored_input1_output);
+            gen_xor_reg_reg_reg(context, &op1->reg, &op3->reg, &xored_input1_output);
 
             reil_register anded_result = {.index = 0, .size = 0};
             gen_and_reg_reg_reg(context, &xored_inputs, &xored_input1_output, &anded_result);
 
             /* The value of the OF flag is now in the sign bit of the anded result */
             reil_integer shifts = {.value = (anded_result.size << 3) - 1, .size = 1};
-            reil_register overflow_status = {.index = 0, .size = 0};
+            reil_register overflow_status = {0};
             gen_shr_reg_int_reg(context, &anded_result, &shifts, &overflow_status);
 
             /* Reduce the size */
             reil_integer size = {.value = EFLAGS_REGISTER_SIZE, .size = 1};
             reil_register overflow_flag;
-            gen_reduce_reg_int_reg(context, &overflow_flag, &size, &overflow_flag);
+            gen_reduce_reg_int_reg(context, &overflow_status, &size, &overflow_flag);
 
             gen_mov_reg_reg(context, &overflow_flag, &REG_OF);
 
@@ -1064,102 +1074,81 @@ static void gen_eflags_update(translation_context * context, reil_operand * op1,
     }
 }
 
-static void calculate_memory_offset(translation_context * context, POPERAND x86operand, int * offset, size_t * offset_size, reil_operand_type * offset_type)
+static void calculate_memory_offset(translation_context * context, POPERAND x86operand, memory_offset * offset)
 {
     /* Offset = Base + (Index * Scale) + Displacement */
-    reil_register base = get_operand_basereg(x86operand);
-    reil_register index = get_operand_indexreg(x86operand);
-    reil_integer scale = get_operand_scale(x86operand);
-    reil_integer displacement = 0;
-    size_t operand_size = get_operand_size(context->x86instruction, x86operand);
-    int has_displacement = get_operand_displacement(x86operand, (unsigned int*)&displacement);
+    size_t operand_size = get_x86operand_size(context->x86instruction, x86operand);
+    reil_register base = {0};
+    get_x86operand_basereg(context->x86instruction, x86operand, &base);
+    reil_register index = {0};
+    get_x86operand_indexreg(context->x86instruction, x86operand, &index);
+    reil_integer scale = {.value = get_operand_scale(x86operand), .size = operand_size};
+    reil_integer displacement = { .value = 0, .size = operand_size};
+    int has_displacement = get_operand_displacement(x86operand, (unsigned int*)&displacement.value);
 
-    *offset = 0;
-    *offset_size = 0;
+    memset(offset, 0, sizeof(*offset));
     /* We assume it is a register, because this is the most common case. */
-    *offset_type = REIL_OPERAND_TYPE_REGISTER;
+    offset->type = REGISTER_OFFSET;
 
-    if ( index != REG_NOP )
+    if ( index.size != 0 )
     {
-        if ( scale )
+        if ( scale.value )
         {
-            reil_register multiplicand = {.index = index, .size = operand_size};
-            reil_integer multiplier = {.value = scale, .size = operand_size};
-            reil_register result = {.index = 0, .size = 0};
-            gen_multiply_reg_int_reg(context, &multiplicand, &multiplier, &result);
-            *offset = result.index;
-            *offset_size = result.size;
+            gen_multiply_reg_int_reg(context, &index, &scale, &offset->reg);
         }
         else
         {
-            *offset = index;
-            *offset_size = operand_size;
+            offset->reg.index = index.index;
+            offset->reg.size = index.size;
         }
     }
 
-    if (base != REG_NOP )
+    if ( base.size != 0)
     {
-        if ( *offset_size )
+        if ( offset->reg.size )
         {
-            reil_register addend1 = {.index = base, .size = operand_size};
-            reil_register addend2 = {.index = *offset, .size = *offset_size};
-            reil_register result = {.index = 0, .size = 0};
-
-            gen_add_reg_reg_reg(context, &addend1, &addend2, &result);
-            *offset = result.index;
-            *offset_size = result.size;
+            reil_register new_offset = {0};
+            gen_add_reg_reg_reg(context, &base, &offset->reg, &new_offset);
+            assign_reg_reg(&new_offset, &offset->reg);
         }
         else
         {
-            *offset = base;
-            *offset_size = operand_size;
+            offset->reg.index = base.index;
+            offset->reg.size = base.size;
         }
     }
 
     if ( has_displacement )
     {
-        if ( *offset_size )
+        if ( offset->reg.size )
         {
-            reil_register addend1 = {.index = *offset, .size = *offset_size};
-            reil_integer  addend2 = {.value = displacement, .size = get_operand_size(context->x86instruction, x86operand)};
-
-            reil_register result = {.index = 0, .size = 0};
-            gen_add_reg_int_reg(context, &addend1, &addend2, &result);
-            *offset = result->index;
-            *offset_size = result->size;
+            reil_register displaced_offset = {0};
+            gen_add_reg_int_reg(context, &offset->reg, &displacement, &displaced_offset);
+            assign_reg_reg(&displaced_offset, &offset->reg);
         }
         else
         {
-            *offset = displacement;
-            *offset_size = get_operand_size(context->x86instruction, x86operand);
-            *offset_type = REIL_OPERAND_TYPE_INTEGER;
+            offset->type = INTEGER_OFFSET;
+            offset->integer.value = displacement.value;
+            offset->integer.size = displacement.size;
         }
     }
-}
-
-static reil_register get_reil_reg_from_scratch_reg(translation_context * context, scratch_register * reg)
-{
-    return ((unsigned long)reg - (unsigned long)&context->scratch_registers[0]) / sizeof(context->scratch_registers[0]) + SCRATCH_REGISTER_BASE;
 }
 
 static void gen_arithmetic_instr(translation_context * context, reil_instruction_index index)
 {
     if ( context->x86instruction->op1.type == OPERAND_TYPE_REGISTER && context->x86instruction->op2.type == OPERAND_TYPE_IMMEDIATE)
     {
-        unsigned int imm;
-        if ( get_operand_immediate(&context->x86instruction->op2, &imm))
+        reil_integer immediate;
+        if ( get_reil_int_from_x86_op(context, &context->x86instruction->op2, &immediate))
         {
+            reil_register op1_reg;
+            get_reil_reg_from_x86_op(context, &context->x86instruction->op1, &op1_reg);
+            
             reil_instruction * arithmetic_instr = alloc_reil_instruction(context, index);
-            reil_register op1_reg = x86regop_to_reilreg(context, &context->x86instruction->op1);
-            size_t op1_reg_size = get_operand_size(context->x86instruction, &context->x86instruction->op1);
 
-            arithmetic_instr->operands[REIL_OPERAND_INPUT1].type = REIL_OPERAND_TYPE_REGISTER;
-            arithmetic_instr->operands[REIL_OPERAND_INPUT1].reg = op1_reg;
-            arithmetic_instr->operands[REIL_OPERAND_INPUT1].size = op1_reg_size;
-
-            arithmetic_instr->operands[REIL_OPERAND_INPUT2].type = REIL_OPERAND_TYPE_INTEGER;
-            arithmetic_instr->operands[REIL_OPERAND_INPUT2].integer = imm;
-            arithmetic_instr->operands[REIL_OPERAND_INPUT2].size = get_operand_size(context->x86instruction, &context->x86instruction->op2);
+            assign_operand_register(&arithmetic_instr->operands[REIL_OPERAND_INPUT1], &op1_reg);
+            assign_operand_integer(&arithmetic_instr->operands[REIL_OPERAND_INPUT2], &immediate);
 
             unsigned int reg_scale;
             if ( index != REIL_DIV || index != REIL_MOD || index != REIL_RSH )
@@ -1168,11 +1157,11 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
                 reg_scale = 1;
             
             reil_register output; 
-            alloc_temp_reg(context, reg_scale*MAX(arithmetic_instr->operands[REIL_OPERAND_INPUT1].size, arithmetic_instr->operands[REIL_OPERAND_INPUT2].size), &output);
+            alloc_temp_reg(context, reg_scale*MAX(arithmetic_instr->operands[REIL_OPERAND_INPUT1].reg.size, arithmetic_instr->operands[REIL_OPERAND_INPUT2].integer.size), &output);
 
-            assign_operand_register(&arithmetic_instr->operands[REIL_OPERAND_OUTPUT], output);
+            assign_operand_register(&arithmetic_instr->operands[REIL_OPERAND_OUTPUT], &output);
 
-            reil_integer size = {.value = op1_reg_size, .size = 1};
+            reil_integer size = {.value = op1_reg.size, .size = 1};
             reil_register reduced_output;
             gen_reduce_reg_int_reg(context, &output, &size, &reduced_output);
 
@@ -1184,8 +1173,7 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
 
             gen_eflags_update(context, op1, op2, &op3);
 
-            reil_register dest = {.index = op1_reg, .size = op1_reg_size};
-            gen_mov_reg_reg(context, &reduced_output, &dst);
+            gen_mov_reg_reg(context, &reduced_output, &op1_reg);
         }
         else
         {
@@ -1194,17 +1182,14 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
     }
     else if ( context->x86instruction->op1.type == OPERAND_TYPE_REGISTER && context->x86instruction->op2.type == OPERAND_TYPE_REGISTER)
     {
-        reil_instruction * arithmetic_instr = alloc_reil_instruction(context, index);
-        reil_register op1_reg = x86regop_to_reilreg(context, &context->x86instruction->op1);
-        size_t op1_reg_size = get_operand_size(context->x86instruction, &context->x86instruction->op1);
+        reil_register op1_reg, op2_reg;
+        get_reil_reg_from_x86_op(context, &context->x86instruction->op1, &op1_reg);
+        get_reil_reg_from_x86_op(context, &context->x86instruction->op2, &op2_reg);
 
-        arithmetic_instr->operands[REIL_OPERAND_INPUT1].type = REIL_OPERAND_TYPE_REGISTER;
-        arithmetic_instr->operands[REIL_OPERAND_INPUT1].reg = op1_reg;
-        arithmetic_instr->operands[REIL_OPERAND_INPUT1].size = op1_reg_size;
-        
-        arithmetic_instr->operands[REIL_OPERAND_INPUT2].type = REIL_OPERAND_TYPE_REGISTER;
-        arithmetic_instr->operands[REIL_OPERAND_INPUT2].reg = x86regop_to_reilreg(context, &context->x86instruction->op2);
-        arithmetic_instr->operands[REIL_OPERAND_INPUT2].size = get_operand_size(context->x86instruction, &context->x86instruction->op2);
+        reil_instruction * arithmetic_instr = alloc_reil_instruction(context, index);
+
+        assign_operand_register(&arithmetic_instr->operands[REIL_OPERAND_INPUT1], &op1_reg);
+        assign_operand_register(&arithmetic_instr->operands[REIL_OPERAND_INPUT2], &op2_reg);
         
         unsigned int reg_scale;
         if ( index != REIL_DIV || index != REIL_MOD || index != REIL_RSH )
@@ -1212,11 +1197,11 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
         else
             reg_scale = 1;
         reil_register output;
-        alloc_temp_reg(context, reg_scale*MAX(arithmetic_instr->operands[REIL_OPERAND_INPUT1].size, arithmetic_instr->operands[REIL_OPERAND_INPUT2].size), &output);
+        alloc_temp_reg(context, reg_scale*MAX(arithmetic_instr->operands[REIL_OPERAND_INPUT1].reg.size, arithmetic_instr->operands[REIL_OPERAND_INPUT2].reg.size), &output);
 
-        assign_operand_register(&arithmetic_instr->operands[REIL_OPERAND_OUTPUT], output);
+        assign_operand_register(&arithmetic_instr->operands[REIL_OPERAND_OUTPUT], &output);
             
-        reil_integer size = {.value = op1_reg_size, .size = 1};
+        reil_integer size = {.value = op1_reg.size, .size = 1};
         reil_register reduced_output;
         gen_reduce_reg_int_reg(context, &output, &size, &reduced_output);
 
@@ -1228,73 +1213,59 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
 
         gen_eflags_update(context, op1, op2, &op3);
 
-        reil_register dest = {.index = op1_reg, .size = op1_reg_size};
-        gen_mov_reg_reg(context, &reduced_output, &dst);
+        gen_mov_reg_reg(context, &reduced_output, &op1_reg);
     }
     else if ( context->x86instruction->op1.type == OPERAND_TYPE_REGISTER && context->x86instruction->op2.type == OPERAND_TYPE_MEMORY)
     {
-        int offset;
-        size_t offset_size;
-        reil_operand_type offset_type;
+        memory_offset offset;
 
-        calculate_memory_offset(context, &context->x86instruction->op2, &offset, &offset_size, &offset_type);
+        calculate_memory_offset(context, &context->x86instruction->op2, &offset);
 
         reil_register value = {.index = 0, .size = 0};
-        if (offset_type == REIL_OPERAND_TYPE_REGISTER )
+        if (offset.type == REGISTER_OFFSET )
         {
-            if ( context->x86instruction->mode == MODE_32 && offset_size > 4 )
+            if ( context->x86instruction->mode == MODE_32 && offset.reg.size > 4 )
             {
-                reil_register to_reduce_reg = {.index = offset, .size = offset_size};
                 reil_integer size = {.value = 4, .size = 1};
                 reil_register reduced_offset;
-                gen_reduce_reg_int_reg(context, &to_reduce_reg, &size, &reduced_offset);
-                offset = reduced_offset->index;
-                offset_size = reduced_offset->size;
+                gen_reduce_reg_int_reg(context, &offset.reg, &size, &reduced_offset);
+                assign_reg_reg(&reduced_offset, &offset.reg);
             }
 
-            if ( context->x86instruction->mode == MODE_16 && offset_size > 2 )
+            if ( context->x86instruction->mode == MODE_16 && offset.reg.size > 2 )
             {
-                reil_register to_reduce_reg = {.index = offset, .size = offset_size};
                 reil_integer size = {.value = 2, .size = 1};
                 reil_register reduced_offset;
-                gen_reduce_reg_int_reg(context, &to_reduce_reg, &size, &reduced_offset);
-                offset = reduced_offset->index;
-                offset_size = reduced_offset->size;
+                gen_reduce_reg_int_reg(context, &offset.reg, &size, &reduced_offset);
+                assign_reg_reg(&reduced_offset, &offset.reg);
             }
 
-            reil_register address = {.index = offset, .size = offset_size};
-            gen_load_reg_reg(context, &address, &value);
+            gen_load_reg_reg(context, &offset.reg, &value);
         }
         else /* REIL_OPERAND_INTEGER */
         {
-            reil_integer address = {.value = offset, .size = offset_size};
-            gen_load_int_reg(context, &address, &value);
+            gen_load_int_reg(context, &offset.integer, &value);
         }
 
+        reil_register op1_reg;
+        get_reil_reg_from_x86_op(context, &context->x86instruction->op1, &op1_reg);
+
         reil_instruction * arithmetic_instr = alloc_reil_instruction(context, index);
-        reil_register op1_reg = x86regop_to_reilreg(context, &context->x86instruction->op1);
-        size_t op1_reg_size = get_operand_size(context->x86instruction, &context->x86instruction->op1);
-
-        arithmetic_instr->operands[REIL_OPERAND_INPUT1].type = REIL_OPERAND_TYPE_REGISTER;
-        arithmetic_instr->operands[REIL_OPERAND_INPUT1].reg = op1_reg;
-        arithmetic_instr->operands[REIL_OPERAND_INPUT1].size = op1_reg_size;
+        assign_operand_register(&arithmetic_instr->operands[REIL_OPERAND_INPUT1], &op1_reg);
+        assign_operand_register(&arithmetic_instr->operands[REIL_OPERAND_INPUT2], &value);
         
-        arithmetic_instr->operands[REIL_OPERAND_INPUT2].type = REIL_OPERAND_TYPE_REGISTER;
-        arithmetic_instr->operands[REIL_OPERAND_INPUT2].reg = get_reil_reg_from_scratch_reg(context, value);
-        arithmetic_instr->operands[REIL_OPERAND_INPUT2].size = value->size;
-
         unsigned int reg_scale;
         if ( index != REIL_DIV || index != REIL_MOD || index != REIL_RSH )
             reg_scale = 2;
         else
             reg_scale = 1;
-        reil_register output;
-        alloc_temp_reg(context, reg_scale*MAX(arithmetic_instr->operands[REIL_OPERAND_INPUT1].size, arithmetic_instr->operands[REIL_OPERAND_INPUT2].size), &output);
+        reil_register output = {0};
+        alloc_temp_reg(context, reg_scale*MAX(arithmetic_instr->operands[REIL_OPERAND_INPUT1].reg.size, arithmetic_instr->operands[REIL_OPERAND_INPUT2].reg.size), &output);
 
-        assign_operand_register(&arithmetic_instr->operands[REIL_OPERAND_OUTPUT], output);
+        assign_operand_register(&arithmetic_instr->operands[REIL_OPERAND_OUTPUT], &output);
 
-        reil_integer size = {.value = op1_reg_size, .size = 1};
-        reil_integer reduced_output;
+        reil_integer size = {.value = op1_reg.size, .size = 1};
+        reil_register reduced_output = {0};
         gen_reduce_reg_int_reg(context, &output, &size, &reduced_output);
 
         /* Update eflags here, so we have all the results intact without copying stuff. */
@@ -1305,41 +1276,32 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
 
         gen_eflags_update(context, op1, op2, &op3);
 
-        reil_register dest = {.index = op1_reg, .size = op1_reg_size};
-        gen_mov_reg_reg(context, &reduced_output, &dst);
+        gen_mov_reg_reg(context, &reduced_output, &op1_reg);
     }
     else if (context->x86instruction->op1.type == OPERAND_TYPE_MEMORY && context->x86instruction->op2.type == OPERAND_TYPE_IMMEDIATE)
     {
-        int offset;
-        size_t offset_size;
-        reil_operand_type offset_type;
+        memory_offset offset;
 
-        calculate_memory_offset(context, &context->x86instruction->op1, &offset, &offset_size, &offset_type);
+        calculate_memory_offset(context, &context->x86instruction->op1, &offset);
 
-        reil_register value = {.index = 0, .size = 0};
-        if (offset_type == REIL_OPERAND_TYPE_REGISTER )
+        reil_register value = {0};
+        if (offset.type == REGISTER_OFFSET )
         {
-            reil_register address = {.index = offset, .size = offset_size};
-            gen_load_reg_reg(context, &address, &value);
+            gen_load_reg_reg(context, &offset.reg, &value);
         }
         else /* REIL_OPERAND_INTEGER */
         {
-            reil_integer address = {.value = offset, .size = offset_size};
-            gen_load_int_reg(context, &address, &value);
+            gen_load_int_reg(context, &offset.integer, &value);
         }
 
         reil_instruction * arithmetic_instr = alloc_reil_instruction(context, index);
 
-        arithmetic_instr->operands[REIL_OPERAND_INPUT1].type = REIL_OPERAND_TYPE_REGISTER;
-        arithmetic_instr->operands[REIL_OPERAND_INPUT1].reg = get_reil_reg_from_scratch_reg(context, value);
-        arithmetic_instr->operands[REIL_OPERAND_INPUT1].size = value->size;
+        assign_operand_register(&arithmetic_instr->operands[REIL_OPERAND_INPUT1], &value);
 
-        unsigned int imm;
-        if ( get_operand_immediate(&context->x86instruction->op2, &imm))
+        reil_integer immediate;
+        if ( get_reil_int_from_x86_op(context, &context->x86instruction->op2, &immediate))
         {
-            arithmetic_instr->operands[REIL_OPERAND_INPUT2].type = REIL_OPERAND_TYPE_INTEGER;
-            arithmetic_instr->operands[REIL_OPERAND_INPUT2].integer = (reil_integer)imm;
-            arithmetic_instr->operands[REIL_OPERAND_INPUT2].size = get_operand_size(context->x86instruction, &context->x86instruction->op2);
+            assign_operand_integer(&arithmetic_instr->operands[REIL_OPERAND_INPUT2], &immediate);
 
             unsigned int reg_scale;
             if ( index != REIL_DIV || index != REIL_MOD || index != REIL_RSH )
@@ -1347,12 +1309,12 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
             else
                 reg_scale = 1;
             reil_register output;
-            alloc_temp_reg(context, reg_scale*MAX(arithmetic_instr->operands[REIL_OPERAND_INPUT1].size, arithmetic_instr->operands[REIL_OPERAND_INPUT2].size), &output);
+            alloc_temp_reg(context, reg_scale*MAX(arithmetic_instr->operands[REIL_OPERAND_INPUT1].reg.size, arithmetic_instr->operands[REIL_OPERAND_INPUT2].integer.size), &output);
 
-            assign_operand_register(&arithmetic_instr->operands[REIL_OPERAND_OUTPUT], output);
+            assign_operand_register(&arithmetic_instr->operands[REIL_OPERAND_OUTPUT], &output);
 
-            reil_integer size = {.value = get_operand_size(context->x86instruction, &context->x86instruction->op1), .size = 1};
-            reil_integer reduced_output;
+            reil_integer size = {.value = get_x86operand_size(context->x86instruction, &context->x86instruction->op1), .size = 1};
+            reil_register reduced_output = {0};
             gen_reduce_reg_int_reg(context, &output, &size, &reduced_output);
 
             /* Update eflags here, so we have all the results intact without copying stuff. */
@@ -1363,8 +1325,11 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
 
             gen_eflags_update(context, op1, op2, &op3);
 
-            reil_register address = {.index = offset, .size = offset_size};
-            gen_store_reg_reg(context, &reduced_output, &address);
+            if (offset.type == REGISTER_OFFSET)
+                gen_store_reg_reg(context, &reduced_output, &offset.reg);
+            else
+                gen_store_reg_int(context, &reduced_output, &offset.integer);
+
         }
         else
         {
@@ -1373,53 +1338,44 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
     }
     else if (context->x86instruction->op1.type == OPERAND_TYPE_MEMORY && context->x86instruction->op2.type == OPERAND_TYPE_REGISTER)
     {
-        int offset;
-        size_t offset_size;
-        reil_operand_type offset_type;
+        memory_offset offset;
 
-        calculate_memory_offset(context, &context->x86instruction->op1, &offset, &offset_size, &offset_type);
+        calculate_memory_offset(context, &context->x86instruction->op1, &offset);
 
-        reil_register value;
-        if (offset_type == REIL_OPERAND_TYPE_REGISTER )
+        reil_register value = {0};
+        if (offset.type == REGISTER_OFFSET )
         {
-            if ( context->x86instruction->mode == MODE_32 && offset_size > 4 )
+            if ( context->x86instruction->mode == MODE_32 && offset.reg.size > 4 )
             {
-                reil_register to_reduce_reg = {.index = offset, .size = offset_size};
                 reil_integer size = {.value = 4, .size = 1};
                 reil_register reduced_offset;
-                gen_reduce_reg_int_reg(context, &to_reduce_reg, &size, &reduced_offset);
-                offset = reduced_offset->index;
-                offset_size = reduced_offset->size;
+                gen_reduce_reg_int_reg(context, &offset.reg, &size, &reduced_offset);
+                assign_reg_reg(&reduced_offset, &offset.reg);
+
             }
 
-            if ( context->x86instruction->mode == MODE_16 && offset_size > 2 )
+            if ( context->x86instruction->mode == MODE_16 && offset.reg.size > 2 )
             {
-                reil_register to_reduce_reg = {.index = offset, .size = offset_size};
                 reil_integer size = {.value = 2, .size = 1};
                 reil_register reduced_offset;
-                gen_reduce_reg_int_reg(context, &to_reduce_reg, &size, &reduced_offset);
-                offset = reduced_offset->index;
-                offset_size = reduced_offset->size;
+                gen_reduce_reg_int_reg(context, &offset.reg, &size, &reduced_offset);
+                assign_reg_reg(&reduced_offset, &offset.reg);
             }
 
-            reil_register address = {.index = offset, .size = offset_size};
-            gen_load_reg_reg(context, &address, &value);
+            gen_load_reg_reg(context, &offset.reg, &value);
         }
-        else /* REIL_OPERAND_INTEGER */
+        else /* INTEGER_OFFSET */
         {
-            reil_integer address = {.value = offset, .size = offset_size};
-            gen_load_int_reg(context, &address, &value);
+            gen_load_int_reg(context, &offset.integer, &value);
         }
 
         reil_instruction * arithmetic_instr = alloc_reil_instruction(context, index);
 
-        arithmetic_instr->operands[REIL_OPERAND_INPUT1].type = REIL_OPERAND_TYPE_REGISTER;
-        arithmetic_instr->operands[REIL_OPERAND_INPUT1].reg = get_reil_reg_from_scratch_reg(context, value);
-        arithmetic_instr->operands[REIL_OPERAND_INPUT1].size = value->size;
+        assign_operand_register(&arithmetic_instr->operands[REIL_OPERAND_INPUT1], &value);
 
-        arithmetic_instr->operands[REIL_OPERAND_INPUT2].type = REIL_OPERAND_TYPE_REGISTER;
-        arithmetic_instr->operands[REIL_OPERAND_INPUT2].reg = x86regop_to_reilreg(context, &context->x86instruction->op2);
-        arithmetic_instr->operands[REIL_OPERAND_INPUT2].size = get_operand_size(context->x86instruction, &context->x86instruction->op2);
+        reil_register input2 = {0};
+        get_reil_reg_from_x86_op(context, &context->x86instruction->op2, &input2);
+        assign_operand_register(&arithmetic_instr->operands[REIL_OPERAND_INPUT2], &input2);
 
         unsigned int reg_scale;
         if ( index != REIL_DIV || index != REIL_MOD || index != REIL_RSH )
@@ -1427,11 +1383,11 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
         else
             reg_scale = 1;
         reil_register output;
-        alloc_temp_reg(context, reg_scale*MAX(arithmetic_instr->operands[REIL_OPERAND_INPUT1].size, arithmetic_instr->operands[REIL_OPERAND_INPUT2].size), &output);
-        assign_operand_register(&arithmetic_instr->operands[REIL_OPERAND_OUTPUT], output);
+        alloc_temp_reg(context, reg_scale*MAX(arithmetic_instr->operands[REIL_OPERAND_INPUT1].reg.size, arithmetic_instr->operands[REIL_OPERAND_INPUT2].reg.size), &output);
+        assign_operand_register(&arithmetic_instr->operands[REIL_OPERAND_OUTPUT], &output);
 
-        reil_integer size = {.value = get_operand_size(context->x86instruction, &context->x86instruction->op1), .size = 1};
-        reil_integer reduced_output;
+        reil_integer size = {.value = get_x86operand_size(context->x86instruction, &context->x86instruction->op1), .size = 1};
+        reil_register reduced_output = {0};
         gen_reduce_reg_int_reg(context, &output, &size, &reduced_output);
 
         /* Update eflags here, so we have all the results intact without copying stuff. */
@@ -1442,8 +1398,10 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
 
         gen_eflags_update(context, op1, op2, &op3);
 
-        reil_register address = {.index = offset, .size = offset_size};
-        gen_store_reg_reg(context, &reduced_output, &address);
+        if (offset.type == REGISTER_OFFSET)
+            gen_store_reg_reg(context, &reduced_output, &offset.reg);
+        else
+            gen_store_reg_int(context, &reduced_output, &offset.integer);
     }
     /* The (I)MUL and (I)DIV instructions take one operand. */
     else if ((context->x86instruction->op1.type == OPERAND_TYPE_REGISTER || 
@@ -1452,51 +1410,66 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
         if (context->x86instruction->type == INSTRUCTION_TYPE_DIV)
         {
             /* The registers used to store the quotient and the remainder depend on the mode and operand size. */
-            size_t operand_size = get_operand_size(context->x86instruction, &context->x86instruction->op1);
-            reil_register dividend, divider, quotient, remainder;
+            size_t operand_size = get_x86operand_size(context->x86instruction, &context->x86instruction->op1);
+            reil_register dividend = {0}, divider = {0}, quotient = {0}, remainder = {0};
             unsigned char divider_is_reg = context->x86instruction->op1.type == OPERAND_TYPE_REGISTER;
 
             if (!divider_is_reg)
             {
-                int offset;
-                size_t offset_size;
-                reil_operand_type offset_type;
+                memory_offset offset;
+                calculate_memory_offset(context, &context->x86instruction->op1, &offset);
 
-                calculate_memory_offset(context, &context->x86instruction->op1, &offset, &offset_size, &offset_type);
+                if ( offset.type == REGISTER_OFFSET )
+                {
+                    if ( context->x86instruction->mode == MODE_32 && offset.reg.size > 4 )
+                    {
+                        reil_integer size = {.value = 4, .size = 1};
+                        reil_register reduced_offset;
+                        gen_reduce_reg_int_reg(context, &offset.reg, &size, &reduced_offset);
+                        assign_reg_reg(&reduced_offset, &offset.reg);
+                    }
 
-                reil_register loaded_divider = {.index = 0, .size = 0};
-                if ( offset_type == REIL_OPERAND_TYPE_REGISTER )
-                {
-                    reil_register address = {.index = offset, .size = offset_size};
-                    gen_load_reg_reg(context, &address, &loaded_divider);
+                    if ( context->x86instruction->mode == MODE_16 && offset.reg.size > 2 )
+                    {
+                        reil_integer size = {.value = 2, .size = 1};
+                        reil_register reduced_offset;
+                        gen_reduce_reg_int_reg(context, &offset.reg, &size, &reduced_offset);
+                        assign_reg_reg(&reduced_offset, &offset.reg);
+                    }
+                    gen_load_reg_reg(context, &offset.reg, &divider);
                 }
-                else /* REIL_OPERAND_TYPE_INTEGER */
+                else /* INTEGER_OFFSET */
                 {
-                    reil_integer address = {.value = offset, .size = offset_size};
-                    gen_load_int_reg(context, &address, &loaded_divider);
+                    gen_load_int_reg(context, &offset.integer, &divider);
                 }
-                divider = get_reil_reg_from_scratch_reg(context, loaded_divider);
             }
 
             switch(operand_size)
             {
                 case 1:
                     {
-                        dividend = X86_REG_AX;
+                        dividend.index = X86_REG_AX;
+                        dividend.size = 2;
                         if (divider_is_reg)
                         {
-                            divider = get_operand_register(&context->x86instruction->op1) + 16;
+                            get_reil_reg_from_x86_op(context, &context->x86instruction->op1, &divider);
+                            /* Correct to our used register table */
+                            // divider.index += 16;
                         }
 
-                        quotient = X86_REG_AL;
-                        remainder = X86_REG_AH;
+                        quotient.index = X86_REG_AL;
+                        quotient.size = 1;
+                        remainder.index = X86_REG_AH;
+                        remainder.size = 1;
                     }
                     break;
                 case 2:
                     {
                         if (divider_is_reg)
                         {
-                            divider = get_operand_register(&context->x86instruction->op1) + 8;
+                            get_reil_reg_from_x86_op(context, &context->x86instruction->op1, &divider);
+                            /* Correct to our used register table */
+                            /* divider.index += 8; */
                         }
 
                         reil_register highpart_dividend; 
@@ -1506,22 +1479,22 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
 
                         reil_integer shifts = {.value = 16, .size = 1};
                         reil_register shifted_highpart_dividend = {.index = 0, .size = 0};
-                        gen_shr_reg_int_reg(context, &highpart_dividend, &shifts, &shifted_highpart_dividend);
+                        gen_shl_reg_int_reg(context, &highpart_dividend, &shifts, &shifted_highpart_dividend);
 
                         reil_register or_with_reg = {.index = X86_REG_AX, .size = 2};
-                        reil_register complete_dividend = {.index = 0, .size = 0};
-                        gen_or_reg_reg_reg(context, &shifted_highpart_dividend, &or_with_reg, &complete_dividend);
+                        gen_or_reg_reg_reg(context, &shifted_highpart_dividend, &or_with_reg, &dividend);
 
-                        dividend = complete_dividend->index;
-                        quotient = X86_REG_AX;
-                        remainder = X86_REG_DX;
+                        quotient.index = X86_REG_AX;
+                        quotient.size = 2;
+                        remainder.index = X86_REG_DX;
+                        remainder.size = 2;
                     }
                     break;
                 case 4:
                     {
                         if (divider_is_reg)
                         {
-                            divider = get_operand_register(&context->x86instruction->op1);
+                            get_reil_reg_from_x86_op(context, &context->x86instruction->op1, &divider);
                         }
 
                         reil_register highpart_dividend; 
@@ -1533,12 +1506,12 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
                         gen_shr_reg_int_reg(context, &highpart_dividend, &shifts, &shifted_highpart_dividend);
                         
                         reil_register or_with_reg = {.index = X86_REG_EAX, .size = 4};
-                        reil_register complete_dividend = {.index = 0, .size = 0};
-                        gen_or_reg_reg_reg(context, &shifted_highpart_dividend, &or_with_reg, &complete_dividend);
+                        gen_or_reg_reg_reg(context, &shifted_highpart_dividend, &or_with_reg, &dividend);
 
-                        dividend = complete_dividend->index;
-                        quotient = X86_REG_EAX;
-                        remainder = X86_REG_EDX;
+                        quotient.index = X86_REG_EAX;
+                        quotient.size = 4;
+                        remainder.index = X86_REG_EDX;
+                        remainder.size = 4;
                     }
                     break;
                 default:
@@ -1546,36 +1519,20 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
             }
 
             reil_instruction * div = alloc_reil_instruction(context, REIL_DIV);
-            div->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
-            div->operands[0].reg = dividend;
-            div->operands[0].size = 2*operand_size;
+            assign_operand_register(&div->operands[REIL_OPERAND_INPUT1], &dividend);
+            assign_operand_register(&div->operands[REIL_OPERAND_INPUT2], &divider);
             
-            div->operands[1].type = REIL_OPERAND_TYPE_REGISTER;
-            div->operands[1].reg = divider;
-            div->operands[1].size = operand_size;
-
             reil_register temp;
             alloc_temp_reg(context, operand_size, &temp);
 
-            assign_operand_register(&div->operands[2], &temp);
+            assign_operand_register(&div->operands[REIL_OPERAND_OUTPUT], &temp);
             
             reil_instruction * mod = alloc_reil_instruction(context, REIL_MOD);
-            mod->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
-            mod->operands[0].reg = dividend;
-            mod->operands[0].size = 2*operand_size;
-            
-            mod->operands[1].type = REIL_OPERAND_TYPE_REGISTER;
-            mod->operands[1].reg = divider;
-            mod->operands[1].size = operand_size;
-            
-            mod->operands[2].type = REIL_OPERAND_TYPE_REGISTER;
-            mod->operands[2].reg = remainder;
-            mod->operands[2].size = operand_size;
+            assign_operand_register(&mod->operands[REIL_OPERAND_INPUT1], &dividend);
+            assign_operand_register(&mod->operands[REIL_OPERAND_INPUT2], &divider);
+            assign_operand_register(&mod->operands[REIL_OPERAND_OUTPUT], &remainder);
 
-            reil_register src = {.index = get_reil_reg_from_scratch_reg(context, temp),
-            .size = temp->size};
-            reil_register dst = {.index = quotient, .size = operand_size };
-            gen_mov_reg_reg(context, &src, &dest);
+            gen_mov_reg_reg(context, &temp, &quotient);
 
             /* The DIV instruction leaves status registers in an undefined state, so we do not
              * need to access the operands */
@@ -1584,30 +1541,38 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
         else if (context->x86instruction->type == INSTRUCTION_TYPE_MUL)
         {
             /* The registers used to store the quotient and the remainder depend on the mode and operand size. */
-            size_t operand_size = get_operand_size(context->x86instruction, &context->x86instruction->op1);
-            reil_register multiplicand , multiplier;
+            size_t operand_size = get_x86operand_size(context->x86instruction, &context->x86instruction->op1);
+            reil_register multiplicand = {0} , multiplier = {0};
             unsigned char multiplier_is_reg = context->x86instruction->op1.type == OPERAND_TYPE_REGISTER;
 
             if (!multiplier_is_reg)
             {
-                int offset;
-                size_t offset_size;
-                reil_operand_type offset_type;
+                memory_offset offset;
+                calculate_memory_offset(context, &context->x86instruction->op1, &offset);
 
-                calculate_memory_offset(context, &context->x86instruction->op1, &offset, &offset_size, &offset_type);
+                if ( offset.type == REGISTER_OFFSET )
+                {
+                    if ( context->x86instruction->mode == MODE_32 && offset.reg.size > 4 )
+                    {
+                        reil_integer size = {.value = 4, .size = 1};
+                        reil_register reduced_offset;
+                        gen_reduce_reg_int_reg(context, &offset.reg, &size, &reduced_offset);
+                        assign_reg_reg(&reduced_offset, &offset.reg);
+                    }
 
-                reil_register loaded_multiplier = {.index = 0, .size = 0};
-                if ( offset_type == REIL_OPERAND_TYPE_REGISTER )
-                {
-                    reil_register address = {.index = offset, .size = offset_size};
-                    gen_load_reg_reg(context, &address, &loaded_multiplier);
+                    if ( context->x86instruction->mode == MODE_16 && offset.reg.size > 2 )
+                    {
+                        reil_integer size = {.value = 2, .size = 1};
+                        reil_register reduced_offset;
+                        gen_reduce_reg_int_reg(context, &offset.reg, &size, &reduced_offset);
+                        assign_reg_reg(&reduced_offset, &offset.reg);
+                    }
+                    gen_load_reg_reg(context, &offset.reg, &multiplier);
                 }
-                else /* REIL_OPERAND_TYPE_INTEGER */
+                else /* INTEGER_OFFSET */
                 {
-                    reil_integer address = {.value = offset, .size = offset_size};
-                    gen_load_int_reg(context, &address, &loaded_multiplier);
+                    gen_load_int_reg(context, &offset.integer, &multiplier);
                 }
-                multiplier = get_reil_reg_from_scratch_reg(context, loaded_multiplier);
             }
 
             reil_instruction * mul = alloc_reil_instruction(context, REIL_MUL);
@@ -1615,121 +1580,99 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
             {
                 case 1:
                     {
-                        multiplicand = X86_REG_AL;
+                        multiplicand.index = X86_REG_AL;
+                        multiplicand.size = 1;
                         if (multiplier_is_reg)
                         {
-                            multiplier = get_operand_register(&context->x86instruction->op1) + 16;
+                            get_reil_reg_from_x86_op(context, &context->x86instruction->op1, &multiplier);
                         }
 
-                        mul->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
-                        mul->operands[0].reg = multiplicand;
-                        mul->operands[0].size = 1;
+                        assign_operand_register(&mul->operands[REIL_OPERAND_INPUT1], &multiplicand);
+                        assign_operand_register(&mul->operands[REIL_OPERAND_INPUT2], &multiplier);
                         
-                        mul->operands[1].type = REIL_OPERAND_TYPE_REGISTER;
-                        mul->operands[1].reg = multiplier;
-                        mul->operands[1].size = 1;
-                        
-                        mul->operands[2].type = REIL_OPERAND_TYPE_REGISTER;
-                        mul->operands[2].reg = X86_REG_AX;
-                        mul->operands[2].size = 2;
+                        reil_register output = {.index = X86_REG_AX, .size = 2};
+                        assign_operand_register(&mul->operands[REIL_OPERAND_OUTPUT], &output);
 
-                        reil_register input = {.index = X86_REG_AH, .size = 1};
-                        gen_is_not_zero_reg_reg(context, &input, &REG_CF);
-                        gen_is_not_zero_reg_reg(context, &input, &REG_OF);
+                        reil_register high_byte= {.index = X86_REG_AH, .size = 1};
+                        gen_is_not_zero_reg_reg(context, &high_byte, &REG_CF);
+                        gen_is_not_zero_reg_reg(context, &high_byte, &REG_OF);
                     }
                     break;
                 case 2:
                     {
-                        multiplicand = X86_REG_AX;
+                        multiplicand.index = X86_REG_AX;
+                        multiplicand.size = 2;
                         if (multiplier_is_reg)
                         {
-                            multiplier = get_operand_register(&context->x86instruction->op1) + 8;
+                            get_reil_reg_from_x86_op(context, &context->x86instruction->op1, &multiplier);
                         }
 
-                        mul->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
-                        mul->operands[0].reg = multiplicand;
-                        mul->operands[0].size = 2;
-                        
-                        mul->operands[1].type = REIL_OPERAND_TYPE_REGISTER;
-                        mul->operands[1].reg = multiplier;
-                        mul->operands[1].size = 2;
+                        assign_operand_register(&mul->operands[REIL_OPERAND_INPUT1], &multiplicand);
+                        assign_operand_register(&mul->operands[REIL_OPERAND_INPUT2], &multiplier);
                         
                         reil_register product;
                         alloc_temp_reg(context, 4, &product);
 
                         assign_operand_register(&mul->operands[2], &product);
 
-                        reil_register to_shift_reg = {.index = get_reil_reg_from_scratch_reg(context, product), .size = product->size};
                         reil_integer shifts = {.value = 16, .size = 1};
                         reil_register high_word = {.index = 0, .size = 0};
-                        gen_shr_reg_int_reg(context, &to_shift_reg, &shifts, &high_word);
-                        reil_integer size = {.value = 2, .size = 1};
+                        gen_shr_reg_int_reg(context, &product, &shifts, &high_word);
+                        reil_integer word_size = {.value = 2, .size = 1};
                         reil_register reduced_high_word;
-                        gen_reduce_reg_int_reg(context, &high_word, &size, &reduced_high_word);
-                        reil_register dest1 = {.index = X86_REG_DX, .size = 2};
-                        gen_mov_reg_reg(context, &reduced_high_word, &dest1);
+                        gen_reduce_reg_int_reg(context, &high_word, &word_size, &reduced_high_word);
+                        reil_register dest_high_word = {.index = X86_REG_DX, .size = 2};
+                        gen_mov_reg_reg(context, &reduced_high_word, &dest_high_word);
 
-                        reil_register to_reduce_low_word = {.index = get_reil_reg_from_scratch_reg(context, product), .size = product->size};
-                        reil_integer size = {.value = 2, .size = 1};
                         reil_register reduced_low_word;
-                        gen_reduce_reg_int_reg(context, &to_reduce_low_word, &size, &reduced_low_word);
-                        reil_register dest2 = {.index = X86_REG_AX, .size = 2};
-                        gen_mov_reg_reg(context, &reduced_low_word, &dest2);
+                        gen_reduce_reg_int_reg(context, &product, &word_size, &reduced_low_word);
+                        reil_register dest_low_word = {.index = X86_REG_AX, .size = 2};
+                        gen_mov_reg_reg(context, &reduced_low_word, &dest_low_word);
 
-                        reil_register input = {.index = X86_REG_DX, .size = 2};
-                        gen_is_not_zero_reg_reg(context, &input, &REG_CF);
-                        gen_is_not_zero_reg_reg(context, &input, &REG_OF);
+                        gen_is_not_zero_reg_reg(context, &dest_high_word, &REG_CF);
+                        gen_is_not_zero_reg_reg(context, &dest_high_word, &REG_OF);
                     }
                     break;
                 case 4:
                     {
-                        multiplicand = X86_REG_EAX;
+                        multiplicand.index = X86_REG_EAX;
+                        multiplicand.size = 4;
                         if (multiplier_is_reg)
                         {
-                            multiplier = get_operand_register(&context->x86instruction->op1);
+                            get_reil_reg_from_x86_op(context, &context->x86instruction->op1, &multiplier);
                         }
 
-                        mul->operands[0].type = REIL_OPERAND_TYPE_REGISTER;
-                        mul->operands[0].reg = multiplicand;
-                        mul->operands[0].size = 4;
-                        
-                        mul->operands[1].type = REIL_OPERAND_TYPE_REGISTER;
-                        mul->operands[1].reg = multiplier;
-                        mul->operands[1].size = 4;
+                        assign_operand_register(&mul->operands[REIL_OPERAND_INPUT1], &multiplicand);
+                        assign_operand_register(&mul->operands[REIL_OPERAND_INPUT2], &multiplier);
                         
                         reil_register product;
                         alloc_temp_reg(context, 8, &product);
 
                         assign_operand_register(&mul->operands[2], &product);
 
-                        reil_register to_shift_reg = {.index = get_reil_reg_from_scratch_reg(context, product), .size = product->size};
                         reil_integer shifts = {.value = 32, .size = 1};
                         reil_register high_dword = {.index = 0, .size = 0};
-                        gen_shr_reg_int_reg(context, &to_shift_reg, &shifts, &high_dword);
-                        reil_integer size = {.value = 4, .size = 1};
+                        gen_shr_reg_int_reg(context, &product, &shifts, &high_dword);
+                        reil_integer dword_size = {.value = 4, .size = 1};
                         reil_register reduced_high_dword;
-                        gen_reduce_reg_int_reg(context, &high_dword, &size, &reduced_high_dword);
+                        gen_reduce_reg_int_reg(context, &high_dword, &dword_size, &reduced_high_dword);
                         
-                        reil_register dest1 = {.index = X86_REG_EDX, .size = 4};
-                        gen_mov_reg_reg(context, &reduced_high_dword, &dest1);
+                        reil_register dest_high_dword = {.index = X86_REG_EDX, .size = 4};
+                        gen_mov_reg_reg(context, &reduced_high_dword, &dest_high_dword);
                         
-                        reil_register to_reduce_low_dword = {.index = get_reil_reg_from_scratch_reg(context, product), .size = product->size};
-                        reil_integer size = {.value = 4, .size = 1};
                         reil_register reduced_low_dword;
-                        gen_reduce_reg_int_reg(context, &to_reduce_low_dword, &size, &reduced_low_dword);
-                        reil_register dest2 = {.index = X86_REG_EAX, .size = 4};
-                        gen_mov_reg_reg(context, &reduced_low_dword, &dest2);
+                        gen_reduce_reg_int_reg(context, &product, &dword_size, &reduced_low_dword);
+                        reil_register dest_low_dword = {.index = X86_REG_EAX, .size = 4};
+                        gen_mov_reg_reg(context, &reduced_low_dword, &dest_low_dword);
 
-                        reil_register input = {.index = X86_REG_EDX, .size = 4};
-                        gen_is_not_zero_reg_reg(context, &input, &REG_CF);
-                        gen_is_not_zero_reg_reg(context, &input, &REG_OF);
+                        gen_is_not_zero_reg_reg(context, &dest_high_dword, &REG_CF);
+                        gen_is_not_zero_reg_reg(context, &dest_high_dword, &REG_OF);
                     }
                     break;
                 default:
                     gen_unknown(context);
                     break;
             }
-
         }
         else
         {
@@ -1742,15 +1685,18 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
     }
 }
 
-static reil_register x86regop_to_reilreg(translation_context * context, POPERAND op)
+static void get_reil_reg_from_x86_op(translation_context * context, POPERAND op, reil_register * reg)
 {
-    reil_register reg = -1;
 	int regtype = 0;
+    size_t regsize = 0;
     // Determine register type
     switch (MASK_AM(op->flags)) {
         case AM_REG:
             if (MASK_FLAGS(op->flags) == F_r)
+            {
                 regtype = REG_SEGMENT;
+                regsize = 2;
+            }
             else if (MASK_FLAGS(op->flags) == F_f)
                 regtype = REG_FPU;
             else
@@ -1791,38 +1737,41 @@ static reil_register x86regop_to_reilreg(translation_context * context, POPERAND
 
     if (regtype == REG_GEN_DWORD) 
     {
+        enum Mode operand_mode = MODE_CHECK_OPERAND(context->x86instruction->mode, context->x86instruction->flags);
         switch (MASK_OT(op->flags)) 
         {
             case OT_b:
-                reg = (REG_GEN_BYTE << 8) + op->reg;
+                reg->index = (REG_GEN_BYTE << 3) + op->reg;
+                reg->size = 1;
                 break;
             case OT_v:
-                reg = (MODE_CHECK_OPERAND(context->x86instruction->mode, context->x86instruction->flags) == MODE_32) ?  (REG_GEN_DWORD << 3) + op->reg : (REG_GEN_WORD << 8) + op->reg;
+                reg->index = (operand_mode == MODE_32)?(REG_GEN_DWORD << 3) + op->reg:(REG_GEN_WORD << 3) + op->reg;
+                reg->size = (operand_mode == MODE_32)?4:2;
                 break;
             case OT_w:
-                reg = (REG_GEN_WORD << 8) + op->reg;
+                reg->index = (REG_GEN_WORD << 3) + op->reg;
+                reg->size = 2;
                 break;
             case OT_d:
-                reg = (REG_GEN_DWORD << 8) + op->reg;
+                reg->index = (REG_GEN_DWORD << 3) + op->reg;
+                reg->size = 4;
                 break;
         }
     } 
     else
     {
-        reg = (regtype << 8) + op->reg;
+        reg->size = 0;
     }
-
-    return reg;
 }
 
 const char *reil_register_x86_formatter(reil_operand * register_operand)
 {
     /* strlen("xword Txxx") + 1 == 11*/
     static char format_buffer[11];
-    if ( register_operand->reg >= SCRATCH_REGISTER_BASE )
+    if ( register_operand->reg.index >= SCRATCH_REGISTER_BASE )
     {
         const char * size_prefix;
-        switch (register_operand->size)
+        switch (register_operand->reg.size)
         {
             case 1:
                 size_prefix = "byte";
@@ -1847,22 +1796,25 @@ const char *reil_register_x86_formatter(reil_operand * register_operand)
                 break;
 
         }
-        snprintf(format_buffer, sizeof(format_buffer), "%s T%i", size_prefix, register_operand->reg);
+        snprintf(format_buffer, sizeof(format_buffer), "%s T%i", size_prefix, register_operand->reg.index);
     }
     else
     {
-        snprintf(format_buffer, sizeof(format_buffer), "%s", ((const char**)x86reg_table)[register_operand->reg]);
+        snprintf(format_buffer, sizeof(format_buffer), "%s", ((const char**)x86reg_table)[register_operand->reg.index]);
     }
     return format_buffer;
 }
 
-static scratch_register * get_scratch_reg_from_reil_reg(translation_context * context, reil_register reg)
+static unsigned char get_reil_int_from_x86_op(translation_context * context, POPERAND op, reil_integer * integer)
 {
-    if ( reg >= SCRATCH_REGISTER_BASE )
+    unsigned int imm;
+    if ( get_operand_immediate(op, &imm) )
     {
-        return &context->scratch_registers[reg - SCRATCH_REGISTER_BASE];
+        integer->value = imm;
+        integer->size = get_x86operand_size(context->x86instruction, op);
+        return 1;
     }
-    return NULL;
+    return 0;
 }
 
 static void assign_operand_register(reil_operand * operand, reil_register * reg)
@@ -1877,4 +1829,10 @@ static void assign_operand_integer(reil_operand * operand, reil_integer * intege
     operand->type = REIL_OPERAND_TYPE_INTEGER;
     operand->integer.value = integer->value;
     operand->integer.size = integer->size;
+}
+
+static void assign_reg_reg(reil_register * src, reil_register * dest)
+{
+    dest->index = src->index;
+    dest->size = src->size;
 }

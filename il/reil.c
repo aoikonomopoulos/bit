@@ -56,7 +56,7 @@ void reil_get_string(reil_instruction * instruction, reil_register_formatter for
         }
         else if (operand->type == REIL_OPERAND_TYPE_INTEGER) 
         {
-                bytes_written = snprintf(string+total_bytes_written, bytes_left, " 0x%x", operand->integer & ((((1 << (operand->integer.size * 8 - 1)) - 1) << 1) | 1) );
+                bytes_written = snprintf(string+total_bytes_written, bytes_left, " 0x%x", operand->integer.value & ((((1 << (operand->integer.size * 8 - 1)) - 1) << 1) | 1) );
         }
         else if (operand->type == REIL_OPERAND_TYPE_REGISTER) 
         {
