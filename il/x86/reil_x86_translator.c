@@ -88,6 +88,7 @@ static const char * x86reg_table[14][8] =
 #define X86_REG_DH      0x16 
 
 #define X86_REG_ESP	0x4
+#define X86_REG_EBP	0x5
 
 #define EFLAG_NOT_IMPL  0x0
 #define EFLAG_BLANK     0x0
@@ -277,6 +278,7 @@ static void gen_eflags_update(translation_context * context, reil_operand * op1,
 /* REIL instruction group generation functions */
 static void gen_arithmetic_instr(translation_context * context, reil_instruction_index index);
 static void gen_push_instr(translation_context * context);
+static void gen_pop_instr(translation_context * context);
 static void gen_ret_instr(translation_context * context);
 
 reil_instructions * reil_translate_from_x86(unsigned long base, unsigned long offset, INSTRUCTION * x86instruction)
@@ -391,6 +393,9 @@ reil_instructions * reil_translate_from_x86(unsigned long base, unsigned long of
             break;
         case INSTRUCTION_TYPE_PUSH:
 		gen_push_instr(&context);
+		break;
+        case INSTRUCTION_TYPE_POP:
+		gen_pop_instr(&context);
 		break;
         case INSTRUCTION_TYPE_RET:
 		gen_ret_instr(&context);
@@ -1738,6 +1743,23 @@ static void gen_push_instr(translation_context *ctx)
 	} else {	/* XXX: TBD */
 		gen_unknown(ctx);
 	}
+}
+
+static void gen_pop_instr(translation_context *ctx)
+{
+	reil_register esp = {
+		.index = X86_REG_ESP,
+		.size = 4,
+	}, ebp = {
+		.index = X86_REG_EBP,
+		.size = 4,
+	};
+
+	if (ctx->x86instruction->op1.type == OPERAND_TYPE_NONE) { /* leave */
+		gen_mov_reg_reg(ctx, &ebp, &esp);
+		gen_load_reg_reg(ctx, &esp, &ebp);
+	} else
+		gen_unknown(ctx);
 }
 
 static void gen_ret_instr(translation_context *ctx)
