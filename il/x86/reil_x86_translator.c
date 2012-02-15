@@ -58,7 +58,7 @@ static __inline__ enum Mode MODE_CHECK_OPERAND(enum Mode mode, int flags)
  * in opcode_tables.c ( part of libdasm ).
  * The other rows contain registers modeling the EFLAGS bits
  */
-static const char * x86reg_table[13][8] = 
+static const char * x86reg_table[14][8] =
 {
 	{ "eax",  "ecx",  "edx",  "ebx",  "esp",  "ebp",  "esi",  "edi"  },
 	{ "ax",   "cx",   "dx",   "bx",   "sp",   "bp",   "si",   "di"   },
@@ -74,6 +74,7 @@ static const char * x86reg_table[13][8] =
 	{ "tf",   "if",   "df",   "of",   "iopl", "nt",   "??",   "rf"   },
 	{ "vm",   "ac",   "vif",  "vip",  "id",   "??",   "??",   "??"   },
 	{ "??",   "??",   "??",   "??",   "??",   "??",   "??",   "??"   },
+	{ "eip", },
 };
 
 #define X86_REG_EAX     0x0
@@ -96,6 +97,8 @@ static const char * x86reg_table[13][8] =
 #define EFLAG_SET       0x8
 #define EFLAG_UNDEF     0xc
 #define EFLAG_RESTORE   0x10
+
+#define X86_REG_EIP	0x68
 
 typedef struct _eflag_affect_reference
 {
@@ -274,6 +277,7 @@ static void gen_eflags_update(translation_context * context, reil_operand * op1,
 /* REIL instruction group generation functions */
 static void gen_arithmetic_instr(translation_context * context, reil_instruction_index index);
 static void gen_push_instr(translation_context * context);
+static void gen_ret_instr(translation_context * context);
 
 reil_instructions * reil_translate_from_x86(unsigned long base, unsigned long offset, INSTRUCTION * x86instruction)
 {
@@ -387,6 +391,9 @@ reil_instructions * reil_translate_from_x86(unsigned long base, unsigned long of
             break;
         case INSTRUCTION_TYPE_PUSH:
 		gen_push_instr(&context);
+		break;
+        case INSTRUCTION_TYPE_RET:
+		gen_ret_instr(&context);
 		break;
         default:
             {
@@ -1731,6 +1738,41 @@ static void gen_push_instr(translation_context *ctx)
 	} else {	/* XXX: TBD */
 		gen_unknown(ctx);
 	}
+}
+
+static void gen_ret_instr(translation_context *ctx)
+{
+	reil_integer imm;
+	reil_register esp = {
+		.index = X86_REG_ESP,
+		.size = 4,
+	}, eip = {
+		.index = X86_REG_EIP,
+		.size = 4,
+	}, tmp, nesp;
+
+	if ((ctx->x86instruction->op1.type != OPERAND_TYPE_NONE) &&
+	    (ctx->x86instruction->op1.type != OPERAND_TYPE_IMMEDIATE)) {
+		    gen_unknown(ctx);
+		    return;
+	}
+
+	/* ldm esp, , eip */
+	gen_load_reg_reg(ctx, &esp, &eip);
+
+	if (ctx->x86instruction->op1.type != OPERAND_TYPE_IMMEDIATE)
+		return;
+
+	/* str op1, , tmp */
+	alloc_temp_reg(ctx, 4, &tmp);
+	gen_mov_int_reg(ctx, &imm, &tmp);
+
+	/* add tmp, esp, nesp */
+	alloc_temp_reg(ctx, 4, &nesp);
+	gen_add_reg_reg_reg(ctx, &tmp, &esp, &nesp);
+
+	/* str nesp, , esp */
+	gen_mov_reg_reg(ctx, &nesp, &esp);
 }
 
 static void get_reil_reg_from_x86_op(translation_context * context, POPERAND op, reil_register * reg)
