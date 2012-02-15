@@ -86,6 +86,8 @@ static const char * x86reg_table[13][8] =
 #define X86_REG_DL      0x12
 #define X86_REG_DH      0x16 
 
+#define X86_REG_ESP	0x4
+
 #define EFLAG_NOT_IMPL  0x0
 #define EFLAG_BLANK     0x0
 #define EFLAG_TEST      0x1
@@ -271,6 +273,7 @@ static void gen_eflags_update(translation_context * context, reil_operand * op1,
 
 /* REIL instruction group generation functions */
 static void gen_arithmetic_instr(translation_context * context, reil_instruction_index index);
+static void gen_push_instr(translation_context * context);
 
 reil_instructions * reil_translate_from_x86(unsigned long base, unsigned long offset, INSTRUCTION * x86instruction)
 {
@@ -382,6 +385,9 @@ reil_instructions * reil_translate_from_x86(unsigned long base, unsigned long of
                 }
             }
             break;
+        case INSTRUCTION_TYPE_PUSH:
+		gen_push_instr(&context);
+		break;
         default:
             {
                 gen_unknown(&context);
@@ -1683,6 +1689,48 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
     {
         gen_unknown(context);
     }
+}
+
+static void gen_push_instr(translation_context *ctx)
+{
+	if (ctx->x86instruction->op1.type == OPERAND_TYPE_REGISTER) {
+		reil_instruction *insn_sub, *insn_stm, *insn_str;
+		reil_register opnd, size, nesp, esp = {
+			.index = X86_REG_ESP,
+			.size = 4,
+		};
+		reil_integer sz;
+
+		alloc_temp_reg(ctx, 4, &size);
+		alloc_temp_reg(ctx, 4, &nesp);
+		get_reil_reg_from_x86_op(ctx, &ctx->x86instruction->op1, &opnd);
+
+		/* str imm sizeof(op), , size */
+		sz.size = 4;
+		sz.value = opnd.size;
+		insn_str = alloc_reil_instruction(ctx, REIL_STR);
+		assign_operand_integer(&insn_str->operands[REIL_OPERAND_INPUT1], &sz);
+		assign_operand_register(&insn_str->operands[REIL_OPERAND_OUTPUT], &size);
+
+		/* sub esp, size, nesp */
+		insn_sub = alloc_reil_instruction(ctx, REIL_SUB);
+		assign_operand_register(&insn_sub->operands[REIL_OPERAND_INPUT1], &esp);
+		assign_operand_register(&insn_sub->operands[REIL_OPERAND_INPUT2], &size);
+		assign_operand_register(&insn_sub->operands[REIL_OPERAND_OUTPUT], &nesp);
+
+		/* str nesp, , esp */
+		insn_str = alloc_reil_instruction(ctx, REIL_STR);
+		assign_operand_register(&insn_str->operands[REIL_OPERAND_INPUT1], &nesp);
+		assign_operand_register(&insn_str->operands[REIL_OPERAND_OUTPUT], &esp);
+
+
+		/* stm opnd, , nesp */
+		insn_stm = alloc_reil_instruction(ctx, REIL_STM);
+		assign_operand_register(&insn_stm->operands[REIL_OPERAND_INPUT1], &opnd);
+		assign_operand_register(&insn_stm->operands[REIL_OPERAND_OUTPUT], &esp);
+	} else {	/* XXX: TBD */
+		gen_unknown(ctx);
+	}
 }
 
 static void get_reil_reg_from_x86_op(translation_context * context, POPERAND op, reil_register * reg)
