@@ -25,16 +25,19 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+#include <fcntl.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include "x86/reil_x86.h"
 #include "reil.h"
 
 void usage(const char * progname);
-unsigned char * read_file(size_t *len, char *name);
+void * read_file(size_t *len, char *name);
 int main(int argc, char** argv)
 {
     if (argc != 2)
@@ -100,38 +103,28 @@ void usage(const char * progname)
            progname);
 }
 
-unsigned char * read_file(size_t *len, char *name)
+void * read_file(size_t *len, char *name)
 {
-        unsigned char            *buf;
-        FILE            *fp;
-        int             c;
-        struct stat     sstat;
+        unsigned char *buf;
+	int fd;
+        struct stat sstat;
 
-        if ((fp = fopen(name, "r+b")) == NULL) {
+        if ((fd = open(name, O_RDONLY)) < 0) {
                 fprintf(stderr,"Error: unable to open file \"%s\"\n", name);
-                exit(0);
+                exit(1);
         }
 
         /* Get file len */
-        if ((c = stat(name, &sstat)) == -1) {
-                fprintf(stderr,"Error: stat\n");
+        if (fstat(fd, &sstat) < 0) {
+                fprintf(stderr,"Error: can't stat \"%s\"\n", name);
                 exit (1);
         }
         *len = sstat.st_size;
 
-        /* Allocate space for file */
-        if (!(buf = (unsigned char *)malloc(*len))) {
-                fprintf(stderr,"Error: malloc\n");
-                exit (1);
+	if (!(buf = mmap(NULL, *len, PROT_READ, MAP_PRIVATE, fd, 0))) {
+                fprintf(stderr,"Error: unable to mmap file \"%s\"\n", name);
+                exit(1);
         }
 
-        /* Read file in allocated space */
-        if ((c = fread(buf, 1, *len, fp)) != *len) {
-                fprintf(stderr,"Error: fread\n");
-                exit (1);
-        }
-
-        fclose(fp);
-
-        return (buf);
+        return buf;
 }
