@@ -25,6 +25,7 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+#include <err.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -280,6 +281,7 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
 static void gen_push_instr(translation_context * context);
 static void gen_pop_instr(translation_context * context);
 static void gen_ret_instr(translation_context * context);
+static void gen_call_instr(translation_context *ctx);
 
 reil_instructions * reil_translate_from_x86(unsigned long base, unsigned long offset, INSTRUCTION * x86instruction)
 {
@@ -391,6 +393,9 @@ reil_instructions * reil_translate_from_x86(unsigned long base, unsigned long of
                 }
             }
             break;
+        case INSTRUCTION_TYPE_CALL:
+		gen_call_instr(&context);
+		break;
         case INSTRUCTION_TYPE_PUSH:
 		gen_push_instr(&context);
 		break;
@@ -1153,6 +1158,36 @@ static void calculate_memory_offset(translation_context * context, POPERAND x86o
     }
 }
 
+/*
+ * Get this operand in a register. If it's an immediate, load the immediate. If
+ * it's a register, get a reil register for it. If it's a memory address, load
+ * the _address_ in a register.
+ */
+static void get_reil_reg_for_op(translation_context *ctx, POPERAND op, reil_register *r)
+{
+	memory_offset offset;
+
+	if (op->type == OPERAND_TYPE_NONE)
+		errx(3, "can't get a register for non-existing operand");
+
+	if (op->type == OPERAND_TYPE_REGISTER) {
+		get_reil_reg_from_x86_op(ctx, op, r);
+		return;
+	}
+	if (op->type == OPERAND_TYPE_IMMEDIATE) {
+		reil_integer imm;
+		get_reil_int_from_x86_op(ctx, op, &imm);
+		gen_load_int_reg(ctx, &imm, r);
+		return;
+	}
+	calculate_memory_offset(ctx, op, &offset);
+	if (offset.type == REGISTER_OFFSET) {
+		memcpy(r, &offset.reg, sizeof(*r));
+	} else {	/* INTEGER_OFFSET */
+		gen_load_int_reg(ctx, &offset.integer, r);
+	}
+}
+
 static void gen_arithmetic_instr(translation_context * context, reil_instruction_index index)
 {
     if ( context->x86instruction->op1.type == OPERAND_TYPE_REGISTER && context->x86instruction->op2.type == OPERAND_TYPE_IMMEDIATE)
@@ -1703,31 +1738,22 @@ static void gen_arithmetic_instr(translation_context * context, reil_instruction
     }
 }
 
-static void gen_push_instr(translation_context *ctx)
+static void gen_push_reg(translation_context *ctx, reil_register *r)
 {
-	if (ctx->x86instruction->op1.type == OPERAND_TYPE_REGISTER) {
 		reil_instruction *insn_sub, *insn_stm, *insn_str;
-		reil_register opnd, size, nesp, esp = {
+		reil_register nesp, esp = {
 			.index = X86_REG_ESP,
 			.size = 4,
 		};
-		reil_integer sz;
-
-		alloc_temp_reg(ctx, 4, &size);
+		reil_integer sz = {
+			.value = r->size,
+			.size = 1,
+		};
 		alloc_temp_reg(ctx, 4, &nesp);
-		get_reil_reg_from_x86_op(ctx, &ctx->x86instruction->op1, &opnd);
-
-		/* str imm sizeof(op), , size */
-		sz.size = 4;
-		sz.value = opnd.size;
-		insn_str = alloc_reil_instruction(ctx, REIL_STR);
-		assign_operand_integer(&insn_str->operands[REIL_OPERAND_INPUT1], &sz);
-		assign_operand_register(&insn_str->operands[REIL_OPERAND_OUTPUT], &size);
-
-		/* sub esp, size, nesp */
+		/* sub esp, sizeof(r), nesp */
 		insn_sub = alloc_reil_instruction(ctx, REIL_SUB);
 		assign_operand_register(&insn_sub->operands[REIL_OPERAND_INPUT1], &esp);
-		assign_operand_register(&insn_sub->operands[REIL_OPERAND_INPUT2], &size);
+		assign_operand_integer(&insn_sub->operands[REIL_OPERAND_INPUT2], &sz);
 		assign_operand_register(&insn_sub->operands[REIL_OPERAND_OUTPUT], &nesp);
 
 		/* str nesp, , esp */
@@ -1735,13 +1761,59 @@ static void gen_push_instr(translation_context *ctx)
 		assign_operand_register(&insn_str->operands[REIL_OPERAND_INPUT1], &nesp);
 		assign_operand_register(&insn_str->operands[REIL_OPERAND_OUTPUT], &esp);
 
-
-		/* stm opnd, , nesp */
+		/* stm r, , nesp */
 		insn_stm = alloc_reil_instruction(ctx, REIL_STM);
-		assign_operand_register(&insn_stm->operands[REIL_OPERAND_INPUT1], &opnd);
+		assign_operand_register(&insn_stm->operands[REIL_OPERAND_INPUT1], r);
 		assign_operand_register(&insn_stm->operands[REIL_OPERAND_OUTPUT], &esp);
+}
+
+static void gen_push_instr(translation_context *ctx)
+{
+	if (ctx->x86instruction->op1.type == OPERAND_TYPE_REGISTER) {
+		reil_register opnd, size, nesp;
+
+		alloc_temp_reg(ctx, 4, &size);
+		alloc_temp_reg(ctx, 4, &nesp);
+		get_reil_reg_from_x86_op(ctx, &ctx->x86instruction->op1, &opnd);
+
+		gen_push_reg(ctx, &opnd);
 	} else {	/* XXX: TBD */
 		gen_unknown(ctx);
+	}
+}
+
+static void gen_call_instr(translation_context *ctx)
+{
+	reil_integer insn_len = {
+		.value = ctx->x86instruction->length,
+		.size = 8,
+	};
+	reil_register ret_addr, jmp_addr, eip = {
+		.index = X86_REG_EIP,
+		.size = 4,
+	};
+
+	/* add esp, $insn_len, ret_addr */
+	alloc_temp_reg(ctx, 4, &ret_addr);
+	gen_add_reg_int_reg(ctx, &eip, &insn_len, &ret_addr);
+
+	gen_push_reg(ctx, &ret_addr);
+
+	if (ctx->x86instruction->op1.type == OPERAND_TYPE_IMMEDIATE) {	/* PC-relative */
+		reil_integer offset;
+
+		alloc_temp_reg(ctx, 4, &jmp_addr);
+		get_reil_int_from_x86_op(ctx, &ctx->x86instruction->op1, &offset);
+		gen_add_reg_int_reg(ctx, &eip, &offset, &jmp_addr);
+		gen_mov_reg_reg(ctx, &jmp_addr, &eip);
+	} else if (ctx->x86instruction->op1.type == OPERAND_TYPE_REGISTER) {
+		/* absolute address */
+		alloc_temp_reg(ctx, 4, &jmp_addr);
+		get_reil_reg_from_x86_op(ctx, &ctx->x86instruction->op1, &jmp_addr);
+	} else if (ctx->x86instruction->op1.type == OPERAND_TYPE_MEMORY) {
+		reil_register ptr;
+		get_reil_reg_for_op(ctx, &ctx->x86instruction->op1, &ptr);
+		gen_load_reg_reg(ctx, &ptr, &eip);
 	}
 }
 
@@ -1786,6 +1858,7 @@ static void gen_ret_instr(translation_context *ctx)
 		return;
 
 	/* str op1, , tmp */
+	get_reil_int_from_x86_op(ctx, &ctx->x86instruction->op1, &imm);
 	alloc_temp_reg(ctx, 4, &tmp);
 	gen_mov_int_reg(ctx, &imm, &tmp);
 
@@ -1926,7 +1999,8 @@ static unsigned char get_reil_int_from_x86_op(translation_context * context, POP
         integer->size = get_x86operand_size(context->x86instruction, op);
         return 1;
     }
-    return 0;
+    /* XXX: return void */
+    errx(3, "tried to get immediate from operand of type %d", op->type);
 }
 
 static void assign_operand_register(reil_operand * operand, reil_register * reg)
