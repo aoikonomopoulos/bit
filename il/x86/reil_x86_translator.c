@@ -278,6 +278,7 @@ static void gen_eflags_update(translation_context * context, reil_operand * op1,
 
 /* REIL instruction group generation functions */
 static void gen_arithmetic_instr(translation_context * context, reil_instruction_index index);
+static void gen_mov_instr(translation_context *ctx);
 static void gen_push_instr(translation_context * context);
 static void gen_pop_instr(translation_context * context);
 static void gen_ret_instr(translation_context * context);
@@ -323,76 +324,8 @@ reil_instructions * reil_translate_from_x86(unsigned long base, unsigned long of
             }
             break;
         case INSTRUCTION_TYPE_MOV:
-            {
-                if ( x86instruction->op1.type == OPERAND_TYPE_REGISTER && x86instruction->op2.type == OPERAND_TYPE_REGISTER)
-                {
-                    reil_register src, dest;
-                    get_reil_reg_from_x86_op(&context, &x86instruction->op2, &src);
-                    get_reil_reg_from_x86_op(&context, &x86instruction->op1, &dest);
-                    gen_mov_reg_reg(&context, &src, &dest);
-                }
-                else if ( x86instruction->op1.type == OPERAND_TYPE_MEMORY && x86instruction->op2.type == OPERAND_TYPE_REGISTER)
-                {
-                    memory_offset offset;
-                    calculate_memory_offset(&context, &x86instruction->op1, &offset);
-
-                    if ( offset.type == REGISTER_OFFSET )
-                    {
-                        reil_register value; 
-                        get_reil_reg_from_x86_op(&context, &x86instruction->op2, &value);
-                        gen_store_reg_reg(&context, &value, &offset.reg);
-                    }
-                    else /* INTEGER_OFFSET */
-                    {
-                        reil_register value; 
-                        get_reil_reg_from_x86_op(&context, &x86instruction->op2, &value);
-                        gen_store_reg_int(&context, &value, &offset.integer);
-                    }
-                }
-                else if ( x86instruction->op1.type == OPERAND_TYPE_REGISTER && x86instruction->op2.type == OPERAND_TYPE_MEMORY)
-                {
-                    memory_offset offset;
-                    calculate_memory_offset(&context, &x86instruction->op2, &offset);
-
-                    if ( offset.type == REGISTER_OFFSET )
-                    {
-                        reil_register value = {.index = 0, .size = 0};
-                        gen_load_reg_reg(&context, &offset.reg, &value);
-
-                        reil_register dest;
-                        get_reil_reg_from_x86_op(&context, &x86instruction->op1, &dest);
-                        gen_mov_reg_reg(&context, &value, &dest);
-                    }
-                    else /* INTEGER_OFFSET */
-                    {
-                        reil_register value = {.index = 0, .size = 0};
-                        gen_load_int_reg(&context, &offset.integer, &value);
-                        reil_register dest;
-                        get_reil_reg_from_x86_op(&context, &x86instruction->op1, &dest);
-                        gen_mov_reg_reg(&context, &value, &dest);
-                    }
-
-                }
-                else if ( x86instruction->op1.type == OPERAND_TYPE_REGISTER && x86instruction->op2.type == OPERAND_TYPE_IMMEDIATE)
-                {
-                    reil_integer immediate;
-                    if ( get_reil_int_from_x86_op(&context, &x86instruction->op2, &immediate) )
-                    {
-                        reil_register dest;
-                        get_reil_reg_from_x86_op(&context, &x86instruction->op1, &dest);
-                        gen_mov_int_reg(&context, &immediate, &dest);
-                    }
-                    else
-                    {
-                        gen_unknown(&context);
-                    }
-                }
-                else
-                {
-                    gen_unknown(&context);
-                }
-            }
-            break;
+		gen_mov_instr(&context);
+		break;
         case INSTRUCTION_TYPE_CALL:
 		gen_call_instr(&context);
 		break;
@@ -1185,6 +1118,60 @@ static void get_reil_reg_for_op(translation_context *ctx, POPERAND op, reil_regi
 		memcpy(r, &offset.reg, sizeof(*r));
 	} else {	/* INTEGER_OFFSET */
 		gen_load_int_reg(ctx, &offset.integer, r);
+	}
+}
+
+static void gen_mov_instr(translation_context *ctx)
+{
+	INSTRUCTION *x86_insn = ctx->x86instruction;
+
+	if (x86_insn->op1.type == OPERAND_TYPE_REGISTER && x86_insn->op2.type == OPERAND_TYPE_REGISTER) {
+		reil_register src, dest;
+		get_reil_reg_from_x86_op(ctx, &x86_insn->op2, &src);
+		get_reil_reg_from_x86_op(ctx, &x86_insn->op1, &dest);
+		gen_mov_reg_reg(ctx, &src, &dest);
+	} else if ( x86_insn->op1.type == OPERAND_TYPE_MEMORY && x86_insn->op2.type == OPERAND_TYPE_REGISTER) {
+		memory_offset offset;
+		calculate_memory_offset(ctx, &x86_insn->op1, &offset);
+
+		if ( offset.type == REGISTER_OFFSET ) {
+                        reil_register value;
+                        get_reil_reg_from_x86_op(ctx, &x86_insn->op2, &value);
+                        gen_store_reg_reg(ctx, &value, &offset.reg);
+		} else { /* INTEGER_OFFSET */
+                        reil_register value;
+                        get_reil_reg_from_x86_op(ctx, &x86_insn->op2, &value);
+                        gen_store_reg_int(ctx, &value, &offset.integer);
+		}
+	} else if (x86_insn->op1.type == OPERAND_TYPE_REGISTER && x86_insn->op2.type == OPERAND_TYPE_MEMORY) {
+		memory_offset offset;
+		calculate_memory_offset(ctx, &x86_insn->op2, &offset);
+
+		if (offset.type == REGISTER_OFFSET) {
+                        reil_register value = {.index = 0, .size = 0};
+                        gen_load_reg_reg(ctx, &offset.reg, &value);
+
+                        reil_register dest;
+                        get_reil_reg_from_x86_op(ctx, &x86_insn->op1, &dest);
+                        gen_mov_reg_reg(ctx, &value, &dest);
+		} else { /* INTEGER_OFFSET */
+                        reil_register value = {.index = 0, .size = 0};
+                        gen_load_int_reg(ctx, &offset.integer, &value);
+                        reil_register dest;
+                        get_reil_reg_from_x86_op(ctx, &x86_insn->op1, &dest);
+                        gen_mov_reg_reg(ctx, &value, &dest);
+		}
+	} else if (x86_insn->op1.type == OPERAND_TYPE_REGISTER && x86_insn->op2.type == OPERAND_TYPE_IMMEDIATE) {
+		reil_integer immediate;
+		if (get_reil_int_from_x86_op(ctx, &x86_insn->op2, &immediate)) {
+                        reil_register dest;
+                        get_reil_reg_from_x86_op(ctx, &x86_insn->op1, &dest);
+                        gen_mov_int_reg(ctx, &immediate, &dest);
+		} else {
+                        gen_unknown(ctx);
+		}
+	} else {
+		gen_unknown(ctx);
 	}
 }
 
