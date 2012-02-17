@@ -1170,6 +1170,18 @@ static void gen_mov_instr(translation_context *ctx)
 		} else {
                         gen_unknown(ctx);
 		}
+	} else if (x86_insn->op1.type == OPERAND_TYPE_MEMORY && x86_insn->op2.type == OPERAND_TYPE_IMMEDIATE) {
+		reil_integer imm;
+		reil_register value, dst;
+
+		alloc_temp_reg(ctx, 4, &value);
+		get_reil_int_from_x86_op(ctx, &x86_insn->op2, &imm);
+		gen_mov_int_reg(ctx, &imm, &value);
+
+		alloc_temp_reg(ctx, 4, &dst);
+		get_reil_reg_for_op(ctx, &x86_insn->op1, &dst);
+
+		gen_store_reg_reg(ctx, &value, &dst);
 	} else {
 		gen_unknown(ctx);
 	}
