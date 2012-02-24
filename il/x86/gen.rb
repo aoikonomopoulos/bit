@@ -129,6 +129,14 @@ class ReilReg < ReilOperand
         cblk.stmts << "gen_load_int_reg(ctx, &#{offset}.integer, &#{r.name});"
       }
     elsif native_opnd.is_a?(NativeImm)
+      r = ReilReg.new_tmp(blk)
+      md = /\d+/.match(r.name)
+      raise "internal error" unless md
+      integer = "integer#{md[0]}"
+      blk.decls << "reil_integer #{integer};"
+      blk.stmts << "alloc_temp_reg(ctx, get_x86operand_size(&x86_inst, &x86_inst->#{native_opnd.op}), #{r.name})";
+      bkl.stmts << "get_reil_int_from_x86_op(ctx, &x86_inst->#{native_opend.op}, &#{integer});"
+      blk.stmts << "gen_mov_int_reg(ctx, &#{integer}, &#{r.name});"
       gen("get_reil_int_from_x86_op()")
       gen("gen_mov_int_reg()")
     else
@@ -168,6 +176,13 @@ class ReilMem < ReilOperand
 end
 
 class ReilImm < ReilOperand
+  @@seq = 0
+  def ReilImm.new_tmp(blk)
+    i = ReilImm.new("i#{@@seq}")
+    @@seq += 1
+    blk.decls << "reil_integer #{i.name};"
+    i
+  end
   def ReilImm.to(native_opnd, blk)
     raise "REIL can't have immediate outputs (duh)"
   end
@@ -178,7 +193,9 @@ class ReilImm < ReilOperand
     elsif native_opnd.is_a?(NativeMem)
       raise "can't get here"
     elsif native_opnd.is_a?(NativeImm)
-      raise "TBD"
+      i = ReilImm.new_tmp(blk)
+      blk.stmts << "get_reil_int_from_x86_op(ctx, &x86_insn->#{native_opnd.op}, &#{i.name});"
+      return i
     else
       raise "can't get here"
     end
@@ -252,7 +269,13 @@ class ReilInstruction
     md[1].to_i
   end
   def assign_operand(insn, idx, opnd)
-    "assign_operand_register(&#{insn}->operands[#{idx}], &#{opnd.name});"
+    if opnd.is_a?(ReilReg)
+      "assign_operand_register(&#{insn}->operands[#{idx}], &#{opnd.name});"
+    elsif opnd.is_a?(ReilImm)
+      "assign_operand_integer(&#{insn}->operands[#{idx}], &#{opnd.name});"
+    else
+      raise "internal error"
+    end
   end
   # OK, this instruction is part of the expansion of a native instruction
   # to REIL instructions. If none of our operands are operands of the native
@@ -310,7 +333,7 @@ end
 class Str < ReilInstruction
   def initialize(op1, op2, op3)
     super(op1, op2, op3)
-    @opnd_types = [[ReilReg, ReilImm], [], [ReilReg]]
+    @opnd_types = [[ReilImm, ReilReg], [], [ReilReg]]
   end
 end
 
@@ -353,7 +376,9 @@ class NativeInstruction
   def opnd_permutations
     @opnd_types[0].each { |op1|
       @opnd_types[1].each { |op2|
-        if !((op1 == NativeMem) and (op2 == NativeMem))
+        if op1 == NativeImm
+          next
+        elsif ((op1 == NativeMem) and (op2 == NativeMem))
           next
         end
         yield op1, op2
