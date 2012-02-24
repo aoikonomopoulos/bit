@@ -326,7 +326,7 @@ end
 class Add < ReilInstruction
   def initialize(op1, op2, op3)
     super(op1, op2, op3)
-    @opnd_types = [[ReilReg.new, ReilImm.new], [ReilReg.new, ReilImm.new], [ReilReg.new(true)]]
+    @opnd_types = [[ReilImm, ReilReg], [ReilImm, ReilReg], [ReilReg]]
   end
 end
 
