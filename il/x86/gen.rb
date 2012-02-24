@@ -89,7 +89,18 @@ class ReilReg < ReilOperand
       blk.stmts << "get_reil_reg_from_x86_op(ctx, &x86_insn->#{native_opnd.op}, &#{r.name});"
       return r
     elsif native_opnd.is_a?(NativeMem)
-      raise "TBD"
+      r = ReilReg.new_tmp(blk)
+      md = /\d+/.match(r.name)
+      raise "internal error" unless md
+      offset = "offset#{md[0]}"
+      blk.decls << "memory_offset #{offset};"
+      blk.stmts << "alloc_temp_reg(ctx, get_x86operand_size(&x86_inst, &x86_inst->#{native_opnd.op}), #{r.name})";
+      blk.stmts << "calculate_memory_offset(ctx, &x86_insn->#{native_opnd.op}, &#{offset});"
+      stmts << "if (#{offset}.type == REGISTER_OFFSET)"
+      stmts << "\tgen_store_reg_reg(ctx, &#{r.name}, &#{offset}.reg);"
+      stmts << "else"
+      stmts << "\tgen_store_reg_int(ctx, &#{r.name}, &#{offset}.integer);"
+      r
     elsif native_opnd.is_a?(NativeImm)
       raise "can't have immediate output operands"
     else
@@ -102,7 +113,21 @@ class ReilReg < ReilOperand
       r = ReilReg.new_tmp(blk)
       blk.stmts << "get_reil_reg_from_x86_op(ctx, &x86_insn->#{native_opnd.op}, &#{r.name});"
     elsif native_opnd.is_a?(NativeMem)
-      gen("get_reil_reg_for_op()")	# XXX
+      r = ReilReg.new_tmp(blk)
+      md = /\d+/.match(r.name)
+      raise "internal error" unless md
+      offset = "offset#{md[0]}"
+      blk.decls << "memory_offset #{offset};"
+      blk.stmts << "alloc_temp_reg(ctx, get_x86operand_size(&x86_inst, &x86_inst->#{native_opnd.op}), #{r.name})";
+      blk.stmts << "calculate_memory_offset(ctx, &x86_insn->#{native_opnd.op}, &#{offset});"
+      blk.stmts << "if (#{offset}.type == REGISTER_OFFSET)"
+      blk.child { |cblk|
+        cblk.stmts << "gen_load_reg_reg(ctx, &#{offset}.reg, &#{r.name});"
+      }
+      blk.stmts << "else"
+      blk.child { |cblk|
+        cblk.stmts << "gen_load_int_reg(ctx, &#{offset}.integer, &#{r.name});"
+      }
     elsif native_opnd.is_a?(NativeImm)
       gen("get_reil_int_from_x86_op()")
       gen("gen_mov_int_reg()")
@@ -115,9 +140,6 @@ class ReilReg < ReilOperand
 end
 
 class ReilMem < ReilOperand
-  def assign_opnd(opnd)
-    raise "TBD"
-  end
   def ReilMem.to(native_opnd, blk)
     putd("trying to get a #{native_opnd} from #{self.name}")
     if native_opnd.is_a?(NativeReg)
@@ -146,9 +168,6 @@ class ReilMem < ReilOperand
 end
 
 class ReilImm < ReilOperand
-  def assign_opnd(opnd)
-    raise "TBD"
-  end
   def ReilImm.to(native_opnd, blk)
     raise "REIL can't have immediate outputs (duh)"
   end
@@ -183,7 +202,7 @@ class ReilInstruction
     "insn#{@@seq}"
   end
   def guards(blk, op1typ, op2typ)
-    blk.stmts << "if (x86_insn->op1.type == #{op1typ.libdasm_optype} && x86_insn->op2.type == #{op1typ.libdasm_optype})"
+    blk.stmts << "if (x86_insn->op1.type == #{op1typ.libdasm_optype} && x86_insn->op2.type == #{op2typ.libdasm_optype})"
   end
 
   # Map a native instruction operand to a REIL operand
@@ -195,7 +214,7 @@ class ReilInstruction
     # and try to get an operand of a type we accept
     op = native_type.new(native_opnd.op)
     accepted_types.each { |typ|
-      putd("trying to get #{typ} for #{native_opnd}")
+      putd("trying to get #{typ} for input opnd #{op}")
       begin
         reil_op = typ.from(op, blk)
         break if reil_op	# first match wins
@@ -204,7 +223,7 @@ class ReilInstruction
       end
     }
     if !reil_op
-      pute("can't get a reil operand from #{native_type}")
+      pute("can't get a reil operand for input opnd of type #{native_type}")
       exit(3)
     end
     reil_op
@@ -214,6 +233,7 @@ class ReilInstruction
     op = native_type.new(@op3.op)
     accepted_types.each { |typ|
       begin
+        putd("trying to get #{typ} for output opnd #{op}")
         reil_op = typ.to(op, blk, stmts)
         break if reil_op
       rescue Exception => e
@@ -221,7 +241,7 @@ class ReilInstruction
       end
     }
     if !reil_op
-      pute("can't get a reil operand for #{native_type}")
+      pute("can't get a reil operand for output opnd of type #{native_type}")
       exit(3)
     end
     reil_op
@@ -242,6 +262,7 @@ class ReilInstruction
   # In this invocation, we must assume that the native instruction's operand
   # types are the ones given, i.e. op1typ and op2typ
   def instantiate(pblk, op1typ, op2typ)
+    putd("instantiating #{self} for op1:#{op1typ}, op2:#{op2typ}")
     # We assume these native operand types here, emit conditional to that effect
     guards(pblk, op1typ, op2typ)
     # emit the body of the conditional statement above
@@ -332,7 +353,7 @@ class NativeInstruction
   def opnd_permutations
     @opnd_types[0].each { |op1|
       @opnd_types[1].each { |op2|
-        if (op1 != NativeReg) or (op2 != NativeReg)
+        if !((op1 == NativeMem) and (op2 == NativeMem))
           next
         end
         yield op1, op2
@@ -354,7 +375,7 @@ class Mov < NativeInstruction
     super(name)
     @opnd_types = [[NativeReg, NativeMem, NativeImm], [NativeReg, NativeMem, NativeImm]]
     @template = [
-                 Str.new(NativeOperand.new("op1"), nil, NativeOperand.new("op2"))
+                 Str.new(NativeOperand.new("op2"), nil, NativeOperand.new("op1"))
                 ]
   end
 end
