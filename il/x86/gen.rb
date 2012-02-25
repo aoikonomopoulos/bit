@@ -103,7 +103,7 @@ class ReilReg < ReilOperand
       raise "internal error" unless md
       offset = "offset#{md[0]}"
       blk.decls << "memory_offset #{offset};"
-      blk.stmts << "alloc_temp_reg(ctx, get_x86operand_size(&x86_inst, &x86_inst->#{native_opnd.op}), #{r.name})";
+      blk.stmts << "alloc_temp_reg(ctx, get_x86operand_size(x86_insn, &x86_insn->#{native_opnd.op}), &#{r.name});"
       blk.stmts << "calculate_memory_offset(ctx, &x86_insn->#{native_opnd.op}, &#{offset});"
       stmts << "if (#{offset}.type == REGISTER_OFFSET)"
       stmts << "\tgen_store_reg_reg(ctx, &#{r.name}, &#{offset}.reg);"
@@ -127,7 +127,7 @@ class ReilReg < ReilOperand
       raise "internal error" unless md
       offset = "offset#{md[0]}"
       blk.decls << "memory_offset #{offset};"
-      blk.stmts << "alloc_temp_reg(ctx, get_x86operand_size(&x86_inst, &x86_inst->#{native_opnd.op}), #{r.name})";
+      blk.stmts << "alloc_temp_reg(ctx, get_x86operand_size(x86_insn, &x86_insn->#{native_opnd.op}), &#{r.name});"
       blk.stmts << "calculate_memory_offset(ctx, &x86_insn->#{native_opnd.op}, &#{offset});"
       blk.stmts << "if (#{offset}.type == REGISTER_OFFSET)"
       blk.child { |cblk|
@@ -143,8 +143,8 @@ class ReilReg < ReilOperand
       raise "internal error" unless md
       integer = "integer#{md[0]}"
       blk.decls << "reil_integer #{integer};"
-      blk.stmts << "alloc_temp_reg(ctx, get_x86operand_size(&x86_inst, &x86_inst->#{native_opnd.op}), #{r.name})";
-      bkl.stmts << "get_reil_int_from_x86_op(ctx, &x86_inst->#{native_opend.op}, &#{integer});"
+      blk.stmts << "alloc_temp_reg(ctx, get_x86operand_size(x86_insn, &x86_insn->#{native_opnd.op}), &#{r.name});"
+      bkl.stmts << "get_reil_int_from_x86_op(ctx, &x86_insn->#{native_opend.op}, &#{integer});"
       blk.stmts << "gen_mov_int_reg(ctx, &#{integer}, &#{r.name});"
       gen("get_reil_int_from_x86_op()")
       gen("gen_mov_int_reg()")
@@ -309,7 +309,7 @@ class ReilInstruction
         reil_op2 = map_operand(@opnd_types[1], @op2, [op1typ, op2typ][native_opnd_number(@op2.op) - 1], blk)
       end
       insn_name = ReilInstruction.newname
-      blk.decls << "reil_instruction #{insn_name};"
+      blk.decls << "reil_instruction *#{insn_name};"
       blk.stmts << "#{insn_name} = alloc_reil_instruction(ctx, REIL_#{self.class.name.upcase});"
       if reil_op1
         blk.stmts << assign_operand(insn_name, 0, reil_op1)
