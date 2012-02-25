@@ -1121,6 +1121,7 @@ static void get_reil_reg_for_op(translation_context *ctx, POPERAND op, reil_regi
 	}
 }
 
+#if 0
 static void gen_mov_instr(translation_context *ctx)
 {
 	INSTRUCTION *x86_insn = ctx->x86instruction;
@@ -1186,6 +1187,7 @@ static void gen_mov_instr(translation_context *ctx)
 		gen_unknown(ctx);
 	}
 }
+#endif
 
 static void gen_arithmetic_instr(translation_context * context, reil_instruction_index index)
 {
@@ -2021,3 +2023,5 @@ static void assign_reg_reg(reil_register * src, reil_register * dest)
     dest->index = src->index;
     dest->size = src->size;
 }
+
+#include "reil_x86_autogen_translator.c"

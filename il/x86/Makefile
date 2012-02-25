@@ -13,6 +13,9 @@ $(library): $(objects)
 	ar -cr $@ libdasm.o 
 	ar -cr $@ reil_x86_translator.o 
 
+reil_x86_autogen_translator.c: gen.rb
+	ruby gen.rb --o $@
+
 # Generate dependencies, excluding system headers.
 %.d: %.c
 	@set -e; rm -f $@; \
