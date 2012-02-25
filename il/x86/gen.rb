@@ -1,7 +1,16 @@
 #!/usr/bin/env ruby
 
+require 'optparse'
+
+$options = {
+  :outfile => $stdout,
+  :debug => false,
+}
+
 def putd(s)
-  $stdout.puts(s)
+  if $options[:debug]
+    $stdout.puts(s)
+  end
 end
 
 def pute(s)
@@ -391,7 +400,7 @@ class NativeInstruction
         reilop.instantiate(@cfw.currblk, op1, op2)
       }
     }
-    puts(@cfw)
+    $options[:outfile].puts(@cfw)
   end
 end
 
@@ -405,7 +414,15 @@ class Mov < NativeInstruction
   end
 end
 
-  
+optp = OptionParser.new { |opts|
+  opts.on("-d", "--[no-]debug", "Produce debug output") { |d|
+    $options[:debug] = d
+  }
+  opts.on("-o", "--output=PATH", "Emit to PATH") { |p|
+    $options[:outfile] = File.open(p, "w+")
+  }
+}
+optp.parse!
 
 mov = Mov.new("mov")
 mov.instantiate
