@@ -305,7 +305,7 @@ class ReilInstruction
       end
     }
     if !reil_op
-      pute("can't get a reil operand for input opnd of type #{native_type}")
+      pute("can't get a reil operand for input opnd of type #{op.class}")
       exit(3)
     end
     reil_op
@@ -412,7 +412,7 @@ end
 class Ldm < ReilInstruction
   def initialize(op1, op2, op3)
     super(op1, op2, op3)
-    @opnd_types = [[ReilMem], [], [ReilReg]]
+    @opnd_types = [[ReilReg, ReilMem], [], [ReilReg]]
   end
 end
 
@@ -454,7 +454,7 @@ end
 
 class NativeReg < NativeOperand
   @@hard_regs = {}
-  ["esp", "eax", "ebx", "ecx", "edx", "ebp"].each { |r|
+  ["esp", "eax", "ebx", "ecx", "edx", "ebp", "eip"].each { |r|
     @@hard_regs[r] = HardReg.new(r, 4)
   }
   ["ax", "bx", "cx", "dx"].each { |r|
@@ -555,3 +555,10 @@ push.pattern([NativeReg], [nil],
               Stm.new(NativeOperand.new("op1"), nil, NativeReg.new("esp"))
              ])
 push.emit
+
+ret = NativeInstruction.new("ret")
+ret.pattern([nil], [nil],
+             [
+              Ldm.new(NativeReg.new("esp"), nil, NativeReg.new("eip"))
+             ])
+ret.emit

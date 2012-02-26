@@ -1837,6 +1837,7 @@ static void gen_pop_instr(translation_context *ctx)
 		gen_unknown(ctx);
 }
 
+#if 0
 static void gen_ret_instr(translation_context *ctx)
 {
 	reil_integer imm;
@@ -1872,6 +1873,7 @@ static void gen_ret_instr(translation_context *ctx)
 	/* str nesp, , esp */
 	gen_mov_reg_reg(ctx, &nesp, &esp);
 }
+#endif
 
 static void get_reil_reg_from_x86_op(translation_context * context, POPERAND op, reil_register * reg)
 {
