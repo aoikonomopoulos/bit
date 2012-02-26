@@ -373,18 +373,15 @@ class NativeImm < NativeOperand
 end
 
 class NativeInstruction
-  @opnds
   attr_accessor :opnd_types
   def initialize(name)
     @name = name
-    @opnd_types = []
-    @template = nil
     @cfw = CFuncWriter.new("static void gen_#{name}_instr(translation_context *ctx)\n")
     @cfw.currblk.decls << "INSTRUCTION *x86_insn = ctx->x86instruction;\n"
   end
-  def opnd_permutations
-    @opnd_types[0].each { |op1|
-      @opnd_types[1].each { |op2|
+  def opnds_permute(opnd_types1, opnd_types2)
+    opnd_types1.each { |op1|
+      opnd_types2.each { |op2|
         if op1 == NativeImm
           next
         elsif ((op1 == NativeMem) and (op2 == NativeMem))
@@ -394,12 +391,14 @@ class NativeInstruction
       }
     }
   end
-  def instantiate
-    opnd_permutations { |op1, op2|
-      @template.each { |reilop|
+  def pattern(opnd_types1, opnd_types2, template)
+    opnds_permute(opnd_types1, opnd_types2) { |op1, op2|
+      template.each { |reilop|
         reilop.instantiate(@cfw.currblk, op1, op2)
       }
     }
+  end
+  def emit
     $options[:outfile].puts(@cfw)
   end
 end
@@ -424,5 +423,9 @@ optp = OptionParser.new { |opts|
 }
 optp.parse!
 
-mov = Mov.new("mov")
-mov.instantiate
+mov = NativeInstruction.new("mov")
+mov.pattern([NativeReg, NativeMem, NativeImm], [NativeReg, NativeMem, NativeImm],
+            [
+             Str.new(NativeOperand.new("op2"), nil, NativeOperand.new("op1"))
+            ])
+mov.emit
