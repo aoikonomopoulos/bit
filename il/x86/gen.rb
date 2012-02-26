@@ -17,6 +17,12 @@ def pute(s)
   $stderr.puts(s)
 end
 
+class ToBeDoneException < Exception
+end
+
+class CantHappenException < Exception
+end
+
 class DeclStatements < Array
   def initialize
     super(["{\n"])
@@ -95,7 +101,13 @@ class ReilReg < ReilOperand
   def ReilReg.to(native_opnd, blk, stmts)
     if native_opnd.is_a?(NativeReg)
       r = ReilReg.new_tmp(blk)
-      blk.stmts << "get_reil_reg_from_x86_op(ctx, &x86_insn->#{native_opnd.op}, &#{r.name});"
+      hard = native_opnd.hard
+      if hard
+        blk.stmts << "#{r.name}.index = X86_REG_#{hard.name.upcase};"
+        blk.stmts << "#{r.name}.size = #{hard.size};"
+      else
+        blk.stmts << "get_reil_reg_from_x86_op(ctx, &x86_insn->#{native_opnd.op}, &#{r.name});"
+      end
       return r
     elsif native_opnd.is_a?(NativeMem)
       r = ReilReg.new_tmp(blk)
@@ -120,7 +132,14 @@ class ReilReg < ReilOperand
     putd("trying to get a #{self.name} from #{native_opnd}")
     if native_opnd.is_a?(NativeReg)
       r = ReilReg.new_tmp(blk)
-      blk.stmts << "get_reil_reg_from_x86_op(ctx, &x86_insn->#{native_opnd.op}, &#{r.name});"
+      hard = native_opnd.hard
+      if hard
+        blk.stmts << "#{r.name}.index = X86_REG_#{hard.name.upcase};"
+        blk.stmts << "#{r.name}.size = #{hard.size};"
+      else
+        blk.stmts << "get_reil_reg_from_x86_op(ctx, &x86_insn->#{native_opnd.op}, &#{r.name});"
+      end
+      return r
     elsif native_opnd.is_a?(NativeMem)
       r = ReilReg.new_tmp(blk)
       md = /\d+/.match(r.name)
@@ -146,8 +165,6 @@ class ReilReg < ReilOperand
       blk.stmts << "alloc_temp_reg(ctx, get_x86operand_size(x86_insn, &x86_insn->#{native_opnd.op}), &#{r.name});"
       bkl.stmts << "get_reil_int_from_x86_op(ctx, &x86_insn->#{native_opend.op}, &#{integer});"
       blk.stmts << "gen_mov_int_reg(ctx, &#{integer}, &#{r.name});"
-      gen("get_reil_int_from_x86_op()")
-      gen("gen_mov_int_reg()")
     else
       raise "can't get here"
     end
@@ -157,12 +174,12 @@ class ReilReg < ReilOperand
 end
 
 class ReilMem < ReilOperand
-  def ReilMem.to(native_opnd, blk)
+  def ReilMem.to(native_opnd, blk, stmts)
     putd("trying to get a #{native_opnd} from #{self.name}")
     if native_opnd.is_a?(NativeReg)
       raise "this seems unlikely, did something wrong?"
     elsif native_opnd.is_a?(NativeMem)
-      raise "TBD"
+      raise ToBeDoneException
     elsif native_opnd.is_a?(NativeImm)
       raise "can't have immediate output operands"
     else
@@ -175,7 +192,6 @@ class ReilMem < ReilOperand
       raise "can't get here"
     elsif native_opnd.is_a?(NativeMem)
       raise "TBD"
-      gen("get_reil_addr_from_op()")	# XXX
     elsif native_opnd.is_a?(NativeImm)
       raise "TBD"
     else
@@ -192,7 +208,7 @@ class ReilImm < ReilOperand
     blk.decls << "reil_integer #{i.name};"
     i
   end
-  def ReilImm.to(native_opnd, blk)
+  def ReilImm.to(native_opnd, blk, stmts)
     raise "REIL can't have immediate outputs (duh)"
   end
   def ReilImm.from(native_opnd, blk)
@@ -207,6 +223,22 @@ class ReilImm < ReilOperand
       return i
     else
       raise "can't get here"
+    end
+  end
+end
+
+class Sizeof
+  def initialize(opnd)
+    @opnd = opnd
+  end
+  def expand(blk)
+    if @opnd.instance_of?(NativeReg)
+      i = ReilImm.new_tmp(blk)
+      blk.stmts << "#{i.name}.size = 1;"
+      blk.stmts << "#{i.name}.value = get_x86operand_size(x86_insn, &x86_insn->#{@opnd.op});"
+      i
+    else
+      throw ToBeDoneException.new("sizeof(#{@opnd.class})")
     end
   end
 end
@@ -227,56 +259,13 @@ class ReilInstruction
     @@seq += 1
     "insn#{@@seq}"
   end
-  def guards(blk, op1typ, op2typ)
-    blk.stmts << "if (x86_insn->op1.type == #{op1typ.libdasm_optype} && x86_insn->op2.type == #{op2typ.libdasm_optype})"
-  end
 
-  # Map a native instruction operand to a REIL operand
-  # The native_opnd is assumed to be of native_type. It needs to somehow
-  # be transformed to one of the accepted types
-  def map_operand(accepted_types, native_opnd, native_type, blk)
-    reil_op = nil
-    # ok, assume our native operand is actually of type 'typ'
-    # and try to get an operand of a type we accept
-    op = native_type.new(native_opnd.op)
-    accepted_types.each { |typ|
-      putd("trying to get #{typ} for input opnd #{op}")
-      begin
-        reil_op = typ.from(op, blk)
-        break if reil_op	# first match wins
-      rescue Exception => e
-        putd("Failed: #{e}")
-      end
-    }
-    if !reil_op
-      pute("can't get a reil operand for input opnd of type #{native_type}")
-      exit(3)
-    end
-    reil_op
-  end
-  def map_output_operand(accepted_types, native_type, blk, stmts)
-    reil_op = nil
-    op = native_type.new(@op3.op)
-    accepted_types.each { |typ|
-      begin
-        putd("trying to get #{typ} for output opnd #{op}")
-        reil_op = typ.to(op, blk, stmts)
-        break if reil_op
-      rescue Exception => e
-        putd("Failed to map output: #{e}")
-      end
-    }
-    if !reil_op
-      pute("can't get a reil operand for output opnd of type #{native_type}")
-      exit(3)
-    end
-    reil_op
-  end
   def native_opnd_number(name)
     md = /^op(\d)$/.match(name)
     raise "WTF, unexpected native operand name (#{name})" unless md
     md[1].to_i
   end
+
   def assign_operand(insn, idx, opnd)
     if opnd.is_a?(ReilReg)
       "assign_operand_register(&#{insn}->operands[#{idx}], &#{opnd.name});"
@@ -286,28 +275,104 @@ class ReilInstruction
       raise "internal error"
     end
   end
+
+  def native_cast(opnd, op1typ, op2typ)
+    if opnd_is_specific(opnd)
+      # this operand already has a specific type
+      return opnd
+    end
+    # pretend the operand has the type we are assumming in this
+    # instantiation
+    if !opnd.instance_of?(NativeOperand)
+      raise CantHappenException.new("unexpected type: #{opnd.class}")
+    end
+    native_type = [op1typ, op2typ][native_opnd_number(opnd.op) - 1]
+    native_type.new(opnd.op)
+  end
+
+  def opnd_is_specific(opnd)
+    opnd.is_a?(NativeReg) or opnd.is_a?(NativeMem) or opnd.is_a?(NativeImm)
+  end
+
+  def map_input_specific(accepted_types, op, blk)
+    reil_op = nil
+    accepted_types.each { |typ|
+      begin
+        reil_op = typ.from(op, blk)
+        break if reil_op	# first match wins
+      rescue Exception => e	# XXX: specific exception types
+        putd("Failed: #{e}")
+      end
+    }
+    if !reil_op
+      pute("can't get a reil operand for input opnd of type #{native_type}")
+      exit(3)
+    end
+    reil_op
+  end
+  def map_output_specific(accepted_types, op, blk, stmts)
+    reil_op = nil
+    accepted_types.each { |typ|
+      begin
+        putd("trying to get #{typ} for output opnd #{op}")
+        reil_op = typ.to(op, blk, stmts)
+        break if reil_op
+      rescue Exception => e	# XXX: specific exception types
+        putd("Failed to map output: #{e}")
+      end
+    }
+    if !reil_op
+      pute("can't get a reil operand for output opnd of type #{op.class}")
+      exit(3)
+    end
+    reil_op
+  end
+  def map_input(opnd, opnd_types, blk)
+    reil_op = nil
+    if opnd.is_a?(NativeOperand)
+      # opnd is already specific at this point
+      raise CantHappenException if opnd.instance_of?(NativeOperand)
+      reil_op = map_input_specific(opnd_types, opnd, blk)
+    elsif opnd.instance_of?(Sizeof)
+      reil_op = opnd.expand(blk)
+    else
+      raise CantHappenException.new("unknown input type: #{opnd.class}")
+    end
+    reil_op
+  end
+
   # OK, this instruction is part of the expansion of a native instruction
   # to REIL instructions. If none of our operands are operands of the native
   # insn, we're in the clear. If some are, then we need to a) reference them
   # b) make sure that the constraints of this REIL instruction are satisfied.
   #
-  # In this invocation, we must assume that the native instruction's operand
-  # types are the ones given, i.e. op1typ and op2typ
+  # In this invocation, we assume that the native instruction's operand
+  # types are the ones given, i.e. op1typ and op2typ. We will be called
+  # for every valid operand type combination.
   def instantiate(pblk, op1typ, op2typ)
     putd("instantiating #{self} for op1:#{op1typ}, op2:#{op2typ}")
-    # We assume these native operand types here, emit conditional to that effect
-    guards(pblk, op1typ, op2typ)
-    # emit the body of the conditional statement above
     pblk.child { |blk|
       reil_op1 = reil_op2 = nil
-      # is our first REIL operand a native operand?
-      if @op1 and @op1.is_a?(NativeOperand)
-        # if so, transform it to a REIL operand that satisfies our constraints
-        reil_op1 = map_operand(@opnd_types[0], @op1, [op1typ, op2typ][native_opnd_number(@op1.op) - 1], blk)
+      # Map a native instruction operand to a REIL operand
+      # The native_opnd is assumed to be of native_type. It needs to somehow
+      # be transformed to one of the accepted types
+      if @op1
+        if @op1.is_a?(NativeOperand)
+          op = native_cast(@op1, op1typ, op2typ)
+        else
+          op = @op1
+        end
+        reil_op1 = map_input(op, @opnd_types[0], blk)
       end
-      if @op2 and @op2.is_a?(NativeOperand)
-        reil_op2 = map_operand(@opnd_types[1], @op2, [op1typ, op2typ][native_opnd_number(@op2.op) - 1], blk)
+      if @op2
+        if @op2.is_a?(NativeOperand)
+          op = native_cast(@op2, op1typ, op2typ)
+        else
+          op = @op2
+        end
+        reil_op2 = map_input(op, @opnd_types[1], blk)
       end
+
       insn_name = ReilInstruction.newname
       blk.decls << "reil_instruction *#{insn_name};"
       blk.stmts << "#{insn_name} = alloc_reil_instruction(ctx, REIL_#{self.class.name.upcase});"
@@ -319,8 +384,13 @@ class ReilInstruction
       end
       reil_op3 = nil
       post_stmts = []
-      if @op3 and @op3.is_a?(NativeOperand)
-        reil_op3 = map_output_operand(@opnd_types[2], [op1typ, op2typ][native_opnd_number(@op3.op) - 1], blk, post_stmts)
+      if @op3
+        if @op3.is_a?(NativeOperand)
+          op = native_cast(@op3, op1typ, op2typ)
+          reil_op3 = map_output_specific(@opnd_types[2], op, blk, post_stmts)
+        else
+          throw CantHappenException.new("unknown output type: #{@op3.class}")
+        end
       end
       if reil_op3
         blk.stmts << assign_operand(insn_name, 2, reil_op3)
@@ -339,10 +409,31 @@ class Add < ReilInstruction
   end
 end
 
+class Ldm < ReilInstruction
+  def initialize(op1, op2, op3)
+    super(op1, op2, op3)
+    @opnd_types = [[ReilMem], [], [ReilReg]]
+  end
+end
+
+class Stm < ReilInstruction
+  def initialize(op1, op2, op3)
+    super(op1, op2, op3)
+    @opnd_types = [[ReilReg], [], [ReilReg]]
+  end
+end
+
 class Str < ReilInstruction
   def initialize(op1, op2, op3)
     super(op1, op2, op3)
     @opnd_types = [[ReilImm, ReilReg], [], [ReilReg]]
+  end
+end
+
+class Sub < ReilInstruction
+  def initialize(op1, op2, op3)
+    super(op1, op2, op3)
+    @opnd_types = [[ReilImm, ReilReg], [ReilImm, ReilReg], [ReilReg]]
   end
 end
 
@@ -353,10 +444,30 @@ class NativeOperand
   end
 end
 
+class HardReg
+  attr_reader :name, :size
+  def initialize(n, sz)
+    @name = n
+    @size = sz
+  end
+end
+
 class NativeReg < NativeOperand
+  @@hard_regs = {}
+  ["esp", "eax", "ebx", "ecx", "edx", "ebp"].each { |r|
+    @@hard_regs[r] = HardReg.new(r, 4)
+  }
+  ["ax", "bx", "cx", "dx"].each { |r|
+    @@hard_regs[r] = HardReg.new(r, 2)
+  }
+  # TBD (XXX: this sucks)
+
   @@libdasm_optype = "OPERAND_TYPE_REGISTER"
   def NativeReg.libdasm_optype
     @@libdasm_optype
+  end
+  def hard
+    @@hard_regs[@op]
   end
 end
 class NativeMem < NativeOperand
@@ -392,24 +503,30 @@ class NativeInstruction
     }
   end
   def pattern(opnd_types1, opnd_types2, template)
-    opnds_permute(opnd_types1, opnd_types2) { |op1, op2|
-      template.each { |reilop|
-        reilop.instantiate(@cfw.currblk, op1, op2)
+    opnds_permute(opnd_types1, opnd_types2) { |typ1, typ2|
+      # We assume these native operand types for this instantiation,
+      # emit conditional to that effect
+      guards(@cfw.currblk, typ1, typ2)
+      @cfw.currblk.child { |body|
+        template.each { |reilop|
+          reilop.instantiate(body, typ1, typ2)
+        }
       }
     }
   end
   def emit
     $options[:outfile].puts(@cfw)
   end
-end
-
-class Mov < NativeInstruction
-  def initialize(name)
-    super(name)
-    @opnd_types = [[NativeReg, NativeMem, NativeImm], [NativeReg, NativeMem, NativeImm]]
-    @template = [
-                 Str.new(NativeOperand.new("op2"), nil, NativeOperand.new("op1"))
-                ]
+private
+  def libdasm_opnd_type(typ)
+    if typ
+      return typ.libdasm_optype
+    end
+    "OPERAND_TYPE_NONE"
+  end
+  def guards(blk, op1typ, op2typ)
+    blk.stmts << "if ((x86_insn->op1.type == #{libdasm_opnd_type(op1typ)}) && " +
+      "(x86_insn->op2.type == #{libdasm_opnd_type(op2typ)}))"
   end
 end
 
@@ -429,3 +546,12 @@ mov.pattern([NativeReg, NativeMem, NativeImm], [NativeReg, NativeMem, NativeImm]
              Str.new(NativeOperand.new("op2"), nil, NativeOperand.new("op1"))
             ])
 mov.emit
+
+push = NativeInstruction.new("push")
+push.pattern([NativeReg], [nil],
+             [
+              Sub.new(NativeReg.new("esp"), Sizeof.new(NativeReg.new("op1")),
+                      NativeReg.new("esp")),
+              Stm.new(NativeOperand.new("op1"), nil, NativeReg.new("esp"))
+             ])
+push.emit

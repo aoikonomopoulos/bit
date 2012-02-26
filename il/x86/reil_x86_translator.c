@@ -1768,6 +1768,7 @@ static void gen_push_reg(translation_context *ctx, reil_register *r)
 		assign_operand_register(&insn_stm->operands[REIL_OPERAND_OUTPUT], &esp);
 }
 
+#if 0
 static void gen_push_instr(translation_context *ctx)
 {
 	if (ctx->x86instruction->op1.type == OPERAND_TYPE_REGISTER) {
@@ -1782,6 +1783,7 @@ static void gen_push_instr(translation_context *ctx)
 		gen_unknown(ctx);
 	}
 }
+#endif
 
 static void gen_call_instr(translation_context *ctx)
 {
