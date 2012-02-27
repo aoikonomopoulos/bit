@@ -509,7 +509,7 @@ class InsnPattern
   def opnds_permute
     @opnd_types1.each { |op1|
       @opnd_types2.each { |op2|
-        if op1 == NativeImm
+        if (op2 != nil) and (op1 == NativeImm)
           next
         elsif ((op1 == NativeMem) and (op2 == NativeMem))
           next
