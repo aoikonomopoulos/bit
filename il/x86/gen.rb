@@ -442,6 +442,9 @@ class NativeOperand
   def initialize(op)
     @op = op
   end
+  def NativeOperand.mnemonic
+    "o"
+  end
 end
 
 class HardReg
@@ -469,11 +472,17 @@ class NativeReg < NativeOperand
   def hard
     @@hard_regs[@op]
   end
+  def NativeReg.mnemonic
+    "r"
+  end
 end
 class NativeMem < NativeOperand
   @@libdasm_optype = "OPERAND_TYPE_MEMORY"
   def NativeMem.libdasm_optype
     @@libdasm_optype
+  end
+  def NativeMem.mnemonic
+    "m"
   end
 end
 class NativeImm < NativeOperand
@@ -481,18 +490,25 @@ class NativeImm < NativeOperand
   def NativeImm.libdasm_optype
     @@libdasm_optype
   end
+  def NativeImm.mnemonic
+    "i"
+  end
 end
 
-class NativeInstruction
-  attr_accessor :opnd_types
-  def initialize(name)
-    @name = name
-    @cfw = CFuncWriter.new("static void gen_#{name}_instr(translation_context *ctx)\n")
+class InsnPattern
+  attr_reader :handler
+  def initialize(base, opnd_types1, opnd_types2, template)
+    @name = "#{base}_#{encode_types(opnd_types1)}_#{encode_types(opnd_types2)}"
+    @opnd_types1 = opnd_types1
+    @opnd_types2 = opnd_types2
+    @template = template
+    @handler = "gen_#{@name}_instr"
+    @cfw = CFuncWriter.new("static void #{@handler}(translation_context *ctx)\n")
     @cfw.currblk.decls << "INSTRUCTION *x86_insn = ctx->x86instruction;\n"
   end
-  def opnds_permute(opnd_types1, opnd_types2)
-    opnd_types1.each { |op1|
-      opnd_types2.each { |op2|
+  def opnds_permute
+    @opnd_types1.each { |op1|
+      @opnd_types2.each { |op2|
         if op1 == NativeImm
           next
         elsif ((op1 == NativeMem) and (op2 == NativeMem))
@@ -502,13 +518,13 @@ class NativeInstruction
       }
     }
   end
-  def pattern(opnd_types1, opnd_types2, template)
-    opnds_permute(opnd_types1, opnd_types2) { |typ1, typ2|
+  def instantiate
+    opnds_permute { |typ1, typ2|
       # We assume these native operand types for this instantiation,
       # emit conditional to that effect
       guards(@cfw.currblk, typ1, typ2)
       @cfw.currblk.child { |body|
-        template.each { |reilop|
+        @template.each { |reilop|
           reilop.instantiate(body, typ1, typ2)
         }
       }
@@ -517,7 +533,31 @@ class NativeInstruction
   def emit
     $options[:outfile].puts(@cfw)
   end
+  def loose_guards
+    s = "if (("
+    s << [[1, @opnd_types1], [2, @opnd_types2]].collect { |pair|
+      idx = pair[0]
+      opnd_types = pair[1]
+      opnd_types.collect { |t|
+        if t != nil
+          "(x86_insn->op#{idx}.type == #{libdasm_opnd_type(t)})"
+        else
+          "(x86_insn->op#{idx}.type == OPERAND_TYPE_NONE)"
+        end
+      }.join(" || ")
+    }.join(") && (")
+    s << "))"
+  end
 private
+  def encode_types(types)
+    types.collect { |t|
+      if t
+        t.mnemonic
+      else
+        "E"
+      end
+    }.join("")
+  end
   def libdasm_opnd_type(typ)
     if typ
       return typ.libdasm_optype
@@ -527,6 +567,59 @@ private
   def guards(blk, op1typ, op2typ)
     blk.stmts << "if ((x86_insn->op1.type == #{libdasm_opnd_type(op1typ)}) && " +
       "(x86_insn->op2.type == #{libdasm_opnd_type(op2typ)}))"
+  end
+end
+
+class NativeInstruction
+  attr_accessor :opnd_types, :patterns, :libdasm_idx
+  @@defined_instructions = []
+  def initialize(name, libdasm_idx)
+    @name = name
+    @libdasm_idx = libdasm_idx
+    @patterns = []
+    @@defined_instructions << self
+  end
+  def NativeInstruction.emit_insns
+    @@defined_instructions.each { |i|
+      i.instantiate
+      i.emit
+    }
+  end
+  def NativeInstruction.emit_demux
+    s = "static (void (*handlers[])(INSTRUCTION *)) = {\n"
+    @@defined_instructions.each { |i|
+      if (i.patterns.size == 1)
+        s << "\t[#{i.libdasm_idx}] = #{i.patterns[0].handler},\n"
+      end
+    }
+    s << "};\n"
+    $options[:outfile].puts(s)
+    cfw = CFuncWriter.new("static void insn_mux(INSTRUCTION *x86_insn)")
+    cfw.currblk.child { |blk|
+      blk.stmts << "if (handlers[x86_insn->type])"
+      blk.stmts << "\thandlers[x86_insn->type](x86_insn);"
+      @@defined_instructions.each { |i|
+        next if i.patterns.size == 1
+        i.patterns.each { |p|
+          blk.stmts << p.loose_guards
+          blk.stmts << "\t#{p.handler}(x86_insn);"
+        }
+      }
+    }
+    $options[:outfile].puts(cfw)
+  end
+  def pattern(opnd_types1, opnd_types2, tmpl)
+    @patterns << InsnPattern.new("#{@name}", opnd_types1, opnd_types2, tmpl)
+  end
+  def instantiate
+    @patterns.each { |p|
+      p.instantiate
+    }
+  end
+  def emit
+    @patterns.each { |p|
+      p.emit
+    }
   end
 end
 
@@ -540,25 +633,25 @@ optp = OptionParser.new { |opts|
 }
 optp.parse!
 
-mov = NativeInstruction.new("mov")
+mov = NativeInstruction.new("mov", "INSTRUCTION_TYPE_MOV")
 mov.pattern([NativeReg, NativeMem, NativeImm], [NativeReg, NativeMem, NativeImm],
             [
              Str.new(NativeOperand.new("op2"), nil, NativeOperand.new("op1"))
             ])
-mov.emit
 
-push = NativeInstruction.new("push")
+push = NativeInstruction.new("push", "INSTRUCTION_TYPE_PUSH")
 push.pattern([NativeReg], [nil],
              [
               Sub.new(NativeReg.new("esp"), Sizeof.new(NativeReg.new("op1")),
                       NativeReg.new("esp")),
               Stm.new(NativeOperand.new("op1"), nil, NativeReg.new("esp"))
              ])
-push.emit
 
-ret = NativeInstruction.new("ret")
+ret = NativeInstruction.new("ret", "INSTRUCTION_TYPE_RET")
 ret.pattern([nil], [nil],
              [
               Ldm.new(NativeReg.new("esp"), nil, NativeReg.new("eip"))
              ])
-ret.emit
+
+NativeInstruction.emit_insns
+NativeInstruction.emit_demux
