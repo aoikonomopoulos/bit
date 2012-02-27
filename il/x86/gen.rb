@@ -652,6 +652,11 @@ ret.pattern([nil], [nil],
              [
               Ldm.new(NativeReg.new("esp"), nil, NativeReg.new("eip"))
              ])
+ret.pattern([NativeImm], [nil],
+             [
+              Ldm.new(NativeReg.new("esp"), nil, NativeReg.new("eip")),
+              Add.new(NativeImm.new("op1"), NativeReg.new("esp"), NativeReg.new("esp"))
+             ])
 
 NativeInstruction.emit_insns
 NativeInstruction.emit_demux
