@@ -98,6 +98,9 @@ class ReilReg < ReilOperand
     blk.decls << "reil_register #{r.name};"
     r
   end
+  def sizeof
+    "#{@name}.size"
+  end
   def ReilReg.to(native_opnd, blk, stmts)
     if native_opnd.is_a?(NativeReg)
       r = ReilReg.new_tmp(blk)
@@ -246,10 +249,11 @@ end
 class ReilInstruction
   @opnd_types
   @@seq = 0
-  def initialize(op1, op2, op3)
+  def initialize(op1, op2, op3, options)
     @op1 = op1
     @op2 = op2
     @op3 = op3
+    @options = options
     @body = ""
   end
   def to_s
@@ -341,6 +345,24 @@ class ReilInstruction
     reil_op
   end
 
+  def assign_operands(blk, insn_name, op1, op2, op3)
+    if op1
+      blk.stmts << assign_operand(insn_name, 0, op1)
+    end
+    if op2
+      blk.stmts << assign_operand(insn_name, 1, op2)
+    end
+    if op3
+      blk.stmts << assign_operand(insn_name, 2, op3)
+    end
+  end
+
+  def gen_insn(blk, op1, op2, op3)
+    insn_name = ReilInstruction.newname
+    blk.decls << "reil_instruction *#{insn_name};"
+    blk.stmts << "#{insn_name} = alloc_reil_instruction(ctx, REIL_#{self.class.name.upcase});"
+    assign_operands(blk, insn_name, op1, op2, op3)
+  end
   # OK, this instruction is part of the expansion of a native instruction
   # to REIL instructions. If none of our operands are operands of the native
   # insn, we're in the clear. If some are, then we need to a) reference them
@@ -372,16 +394,6 @@ class ReilInstruction
         end
         reil_op2 = map_input(op, @opnd_types[1], blk)
       end
-
-      insn_name = ReilInstruction.newname
-      blk.decls << "reil_instruction *#{insn_name};"
-      blk.stmts << "#{insn_name} = alloc_reil_instruction(ctx, REIL_#{self.class.name.upcase});"
-      if reil_op1
-        blk.stmts << assign_operand(insn_name, 0, reil_op1)
-      end
-      if reil_op2
-        blk.stmts << assign_operand(insn_name, 1, reil_op2)
-      end
       reil_op3 = nil
       post_stmts = []
       if @op3
@@ -392,48 +404,80 @@ class ReilInstruction
           throw CantHappenException.new("unknown output type: #{@op3.class}")
         end
       end
-      if reil_op3
-        blk.stmts << assign_operand(insn_name, 2, reil_op3)
-        post_stmts.each { |s|
-          blk.stmts << s
-        }
-      end
+      gen_insn(blk, reil_op1, reil_op2, reil_op3)
+      post_stmts.each { |s|
+        blk.stmts << s
+      }
     }
   end
 end
 
 class Add < ReilInstruction
-  def initialize(op1, op2, op3)
-    super(op1, op2, op3)
+  def initialize(op1, op2, op3, options={})
+    super(op1, op2, op3, options)
     @opnd_types = [[ReilImm, ReilReg], [ReilImm, ReilReg], [ReilReg]]
+  end
+  def gen_insn(blk, op1, op2, op3)
+    insn_name = ReilInstruction.newname
+    size = ReilImm.new_tmp(blk)
+    reduced = ReilReg.new_tmp(blk)
+    blk.decls << "reil_instruction *#{insn_name};"
+    blk.stmts << "alloc_temp_reg(ctx, #{op3.sizeof}, &#{reduced.name});"
+    blk.stmts << "#{insn_name} = alloc_reil_instruction(ctx, REIL_ADD);"
+    blk.stmts << "#{size.name}.value = #{op3.sizeof};"
+    blk.stmts << "#{size.name}.size = 1;"
+    # XXX: need to make sure the dest is twice the size of the addends.
+    # That is, IF we want to go down that path...
+    blk.stmts << "gen_reduce_reg_int_reg(ctx, &#{op3.name}, &#{size.name}, &#{reduced.name});"
+    if @options[:update_eflags]
+      blk.stmts << "gen_eflags_update(ctx, &#{op1.name}, &#{op2.name}, &#{reduced.name});"
+    end
+    blk.stmts << "gen_mov_reg_reg(ctx, &#{reduced.name}, &#{op3.name});"
+    assign_operands(blk, insn_name, op1, op2, op3)
+  end
+end
+
+class Sub < ReilInstruction
+  def initialize(op1, op2, op3, options={})
+    super(op1, op2, op3, options)
+    @opnd_types = [[ReilImm, ReilReg], [ReilImm, ReilReg], [ReilReg]]
+  end
+  def gen_insn(blk, op1, op2, op3)
+    insn_name = ReilInstruction.newname
+    size = ReilImm.new_tmp(blk)
+    reduced = ReilReg.new_tmp(blk)
+    blk.decls << "reil_instruction *#{insn_name};"
+    blk.stmts << "alloc_temp_reg(ctx, #{op3.sizeof}, &#{reduced.name});"
+    blk.stmts << "#{insn_name} = alloc_reil_instruction(ctx, REIL_SUB);"
+    blk.stmts << "#{size.name}.value = #{op3.sizeof};"
+    blk.stmts << "#{size.name}.size = 1;"
+    blk.stmts << "gen_reduce_reg_int_reg(ctx, &#{op3.name}, &#{size.name}, &#{reduced.name});"
+    if @options[:update_eflags]
+      blk.stmts << "gen_eflags_update(ctx, &#{op1.name}, &#{op2.name}, &#{reduced.name});"
+    end
+    blk.stmts << "gen_mov_reg_reg(ctx, &#{reduced.name}, &#{op3.name});"
+    assign_operands(blk, insn_name, op1, op2, op3)
   end
 end
 
 class Ldm < ReilInstruction
-  def initialize(op1, op2, op3)
-    super(op1, op2, op3)
+  def initialize(op1, op2, op3, options={})
+    super(op1, op2, op3, options)
     @opnd_types = [[ReilReg, ReilMem], [], [ReilReg]]
   end
 end
 
 class Stm < ReilInstruction
-  def initialize(op1, op2, op3)
-    super(op1, op2, op3)
+  def initialize(op1, op2, op3, options={})
+    super(op1, op2, op3, options)
     @opnd_types = [[ReilReg], [], [ReilReg]]
   end
 end
 
 class Str < ReilInstruction
-  def initialize(op1, op2, op3)
-    super(op1, op2, op3)
+  def initialize(op1, op2, op3, options={})
+    super(op1, op2, op3, options)
     @opnd_types = [[ReilImm, ReilReg], [], [ReilReg]]
-  end
-end
-
-class Sub < ReilInstruction
-  def initialize(op1, op2, op3)
-    super(op1, op2, op3)
-    @opnd_types = [[ReilImm, ReilReg], [ReilImm, ReilReg], [ReilReg]]
   end
 end
 
@@ -665,6 +709,10 @@ ret.pattern([nil], [nil],
 ret.pattern([NativeImm], [nil],
              [
               Ldm.new(NativeReg.new("esp"), nil, NativeReg.new("eip")),
+
+              # XXX: disallow dst == srcX? This would be especially tricky
+              # if we go with sizeof(dst) == 2 * sizeof(src).
+
               Add.new(NativeImm.new("op1"), NativeReg.new("esp"), NativeReg.new("esp"))
              ])
 
