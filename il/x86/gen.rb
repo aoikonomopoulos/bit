@@ -586,7 +586,7 @@ class NativeInstruction
     }
   end
   def NativeInstruction.emit_demux
-    s = "static (void (*handlers[])(INSTRUCTION *)) = {\n"
+    s = "static void (*handlers[])(translation_context *) = {\n"
     @@defined_instructions.each { |i|
       if (i.patterns.size == 1)
         s << "\t[#{i.libdasm_idx}] = #{i.patterns[0].handler},\n"
@@ -594,18 +594,28 @@ class NativeInstruction
     }
     s << "};\n"
     $options[:outfile].puts(s)
-    cfw = CFuncWriter.new("static void insn_mux(INSTRUCTION *x86_insn)")
+    cfw = CFuncWriter.new("static void insn_mux(translation_context *ctx)")
+    cfw.currblk.decls << "INSTRUCTION *x86_insn = ctx->x86instruction;\n"
+    cfw.currblk.stmts << "do "
     cfw.currblk.child { |blk|
-      blk.stmts << "if (handlers[x86_insn->type])"
-      blk.stmts << "\thandlers[x86_insn->type](x86_insn);"
+      blk.stmts << "if ((x86_insn->type < (sizeof(handlers) / sizeof(handlers[0]))) && handlers[x86_insn->type])"
+      blk.child { |b|
+        b.stmts << "handlers[x86_insn->type](ctx);"
+        b.stmts << "break;"
+      }
       @@defined_instructions.each { |i|
         next if i.patterns.size == 1
         i.patterns.each { |p|
           blk.stmts << p.loose_guards
-          blk.stmts << "\t#{p.handler}(x86_insn);"
+          blk.child { |b|
+            b.stmts << "#{p.handler}(ctx);"
+            b.stmts << "break;"
+          }
         }
       }
+      blk.stmts << "gen_unknown(ctx);"
     }
+    cfw.currblk.stmts << " while(0);"
     $options[:outfile].puts(cfw)
   end
   def pattern(opnd_types1, opnd_types2, tmpl)

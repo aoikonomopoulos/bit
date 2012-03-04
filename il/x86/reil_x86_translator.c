@@ -283,6 +283,7 @@ static void gen_push_instr(translation_context * context);
 static void gen_pop_instr(translation_context * context);
 static void gen_ret_instr(translation_context * context);
 static void gen_call_instr(translation_context *ctx);
+static void insn_mux(translation_context *ctx);
 
 reil_instructions * reil_translate_from_x86(unsigned long base, unsigned long offset, INSTRUCTION * x86instruction)
 {
@@ -323,21 +324,18 @@ reil_instructions * reil_translate_from_x86(unsigned long base, unsigned long of
                 gen_arithmetic_instr(&context, REIL_DIV);
             }
             break;
-        case INSTRUCTION_TYPE_MOV:
-		gen_mov_instr(&context);
-		break;
         case INSTRUCTION_TYPE_CALL:
 		gen_call_instr(&context);
-		break;
-        case INSTRUCTION_TYPE_PUSH:
-		gen_push_instr(&context);
 		break;
         case INSTRUCTION_TYPE_POP:
 		gen_pop_instr(&context);
 		break;
+        case INSTRUCTION_TYPE_MOV:
+        case INSTRUCTION_TYPE_PUSH:
         case INSTRUCTION_TYPE_RET:
-		gen_ret_instr(&context);
+		insn_mux(&context);
 		break;
+
         default:
             {
                 gen_unknown(&context);
