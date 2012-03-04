@@ -294,16 +294,6 @@ reil_instructions * reil_translate_from_x86(unsigned long base, unsigned long of
 
     switch (x86instruction->type)
     {
-        case INSTRUCTION_TYPE_ADD:
-            {
-                gen_arithmetic_instr(&context, REIL_ADD);
-            }
-            break;
-        case INSTRUCTION_TYPE_SUB:
-            {
-                gen_arithmetic_instr(&context, REIL_SUB);
-            }
-            break;
         case INSTRUCTION_TYPE_MUL:
             {
                 gen_arithmetic_instr(&context, REIL_MUL);
@@ -330,6 +320,8 @@ reil_instructions * reil_translate_from_x86(unsigned long base, unsigned long of
         case INSTRUCTION_TYPE_POP:
 		gen_pop_instr(&context);
 		break;
+        case INSTRUCTION_TYPE_ADD:
+        case INSTRUCTION_TYPE_SUB:
         case INSTRUCTION_TYPE_MOV:
         case INSTRUCTION_TYPE_PUSH:
         case INSTRUCTION_TYPE_RET:

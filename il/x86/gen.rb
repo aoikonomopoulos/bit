@@ -429,11 +429,13 @@ class Add < ReilInstruction
     # XXX: need to make sure the dest is twice the size of the addends.
     # That is, IF we want to go down that path...
     blk.stmts << "gen_reduce_reg_int_reg(ctx, &#{op3.name}, &#{size.name}, &#{reduced.name});"
+    assign_operands(blk, insn_name, op1, op2, op3)
     if @options[:update_eflags]
-      blk.stmts << "gen_eflags_update(ctx, &#{op1.name}, &#{op2.name}, &#{reduced.name});"
+      blk.decls << "reil_operand op3;"
+      blk.stmts << "assign_operand_register(&op3, &#{reduced.name});"
+      blk.stmts << "gen_eflags_update(ctx, &#{insn_name}->operands[0], &#{insn_name}->operands[1], &op3);"
     end
     blk.stmts << "gen_mov_reg_reg(ctx, &#{reduced.name}, &#{op3.name});"
-    assign_operands(blk, insn_name, op1, op2, op3)
   end
 end
 
@@ -452,11 +454,13 @@ class Sub < ReilInstruction
     blk.stmts << "#{size.name}.value = #{op3.sizeof};"
     blk.stmts << "#{size.name}.size = 1;"
     blk.stmts << "gen_reduce_reg_int_reg(ctx, &#{op3.name}, &#{size.name}, &#{reduced.name});"
+    assign_operands(blk, insn_name, op1, op2, op3)
     if @options[:update_eflags]
-      blk.stmts << "gen_eflags_update(ctx, &#{op1.name}, &#{op2.name}, &#{reduced.name});"
+      blk.decls << "reil_operand op3;"
+      blk.stmts << "assign_operand_register(&op3, &#{reduced.name});"
+      blk.stmts << "gen_eflags_update(ctx, &#{insn_name}->operands[0], &#{insn_name}->operands[1], &op3);"
     end
     blk.stmts << "gen_mov_reg_reg(ctx, &#{reduced.name}, &#{op3.name});"
-    assign_operands(blk, insn_name, op1, op2, op3)
   end
 end
 
@@ -714,6 +718,18 @@ ret.pattern([NativeImm], [nil],
               # if we go with sizeof(dst) == 2 * sizeof(src).
 
               Add.new(NativeImm.new("op1"), NativeReg.new("esp"), NativeReg.new("esp"))
+             ])
+
+add = NativeInstruction.new("add", "INSTRUCTION_TYPE_ADD")
+add.pattern([NativeReg, NativeMem, NativeImm], [NativeReg, NativeMem, NativeImm],
+            [
+             Add.new(NativeOperand.new("op1"), NativeOperand.new("op2"), NativeOperand.new("op1"), :update_eflags => true)
+             ])
+
+sub = NativeInstruction.new("sub", "INSTRUCTION_TYPE_SUB")
+sub.pattern([NativeReg, NativeMem, NativeImm], [NativeReg, NativeMem, NativeImm],
+            [
+             Sub.new(NativeOperand.new("op1"), NativeOperand.new("op2"), NativeOperand.new("op1"), :update_eflags => true)
              ])
 
 NativeInstruction.emit_insns
