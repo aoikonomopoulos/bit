@@ -40,6 +40,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 	    fprintf(stderr, __VA_ARGS__);			\
 	    abort();						\
     } while (0)
+#define cant_get_here()		do {					\
+    fprintf(stderr, "Can't get here (%s:%d)\n", __FILE__, __LINE__);	\
+    abort();								\
+    } while (0)
 
 /* Check for address/operand size override, copied from libdasm.c */
 
@@ -159,7 +163,7 @@ static eflag_affect_reference eflags_cross_reference[] =
 	/* INSTRUCTION_TYPE_XOR */ {EFLAG_NOT_IMPL},
 	/* INSTRUCTION_TYPE_LEA */ {EFLAG_NOT_IMPL},
 	/* INSTRUCTION_TYPE_XCHG */ {EFLAG_NOT_IMPL},
-	/* INSTRUCTION_TYPE_CMP */ {EFLAG_NOT_IMPL},
+	/* INSTRUCTION_TYPE_CMP */ {EFLAG_MODIFY, EFLAG_MODIFY, EFLAG_MODIFY,EFLAG_MODIFY, EFLAG_MODIFY, EFLAG_MODIFY},
 	/* INSTRUCTION_TYPE_TEST */ {EFLAG_NOT_IMPL},
 	/* INSTRUCTION_TYPE_PUSH */ {EFLAG_NOT_IMPL},
 	/* INSTRUCTION_TYPE_AND */ {EFLAG_NOT_IMPL},
@@ -334,6 +338,7 @@ reil_instructions * reil_translate_from_x86(unsigned long base, unsigned long of
 		break;
         case INSTRUCTION_TYPE_ADD:
         case INSTRUCTION_TYPE_SUB:
+        case INSTRUCTION_TYPE_CMP:
         case INSTRUCTION_TYPE_MOV:
         case INSTRUCTION_TYPE_PUSH:
         case INSTRUCTION_TYPE_RET:
@@ -766,8 +771,10 @@ static void handle_eflag_rest(translation_context *ctx, int flag, reil_register 
 		gen_reset_reg(ctx, reg);
 	else if (flag & EFLAG_SET)
 		gen_set_reg(ctx, reg);
+	else if (!flag)
+		not_implemented("eflag for %d\n", ctx->x86instruction->type);
 	else
-		abort();	/* cant_get_here() */
+		cant_get_here();
 }
 
 static void gen_arith_cf_update(translation_context *ctx, reil_operand *op3)
@@ -918,7 +925,8 @@ static void gen_arith_of_update(translation_context * context, reil_operand * op
          * -------#--------#--------#---
          *
          * */
-        if (context->x86instruction->type == INSTRUCTION_TYPE_SUB) {
+        if ((context->x86instruction->type == INSTRUCTION_TYPE_SUB) ||
+	    (context->x86instruction->type == INSTRUCTION_TYPE_SUB)) {
 		reil_register xored_inputs = {.index = 0, .size = 0};
 		if ( op2->type == REIL_OPERAND_TYPE_REGISTER )
 			gen_xor_reg_reg_reg(context, &op1->reg, &op2->reg, &xored_inputs);
@@ -1833,7 +1841,7 @@ static void gen_cjmp_instr(translation_context *ctx)
 		get_reil_int_from_x86_op(ctx, &x86_insn->op1, &imm);
 		assign_operand_integer(&jcc->operands[REIL_OPERAND_OUTPUT], &imm);
 	} else {
-		abort();	/* XXX: cant_happen() */
+		cant_get_here();
 	}
 }
 

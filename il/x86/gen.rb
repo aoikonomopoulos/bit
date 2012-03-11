@@ -246,6 +246,26 @@ class Sizeof
   end
 end
 
+# temporary reil register, created using a native register as a template
+class ReilRegTemplate
+  def initialize(reg)
+    @template = reg
+  end
+  def expand(blk)
+    if @template.instance_of?(NativeReg)
+      raise "can't expand non-hard reg" unless @template.hard
+      r = ReilReg.new_tmp(blk)
+      blk.stmts << "alloc_temp_reg(ctx, #{@template.hard.size}, &#{r.name});"
+      return r
+    elsif @template.instance_of?(NativeOperand)
+      r = ReilReg.new_tmp(blk)
+      blk.stmts << "alloc_temp_reg(ctx, get_x86operand_size(x86_insn, &x86_insn->#{@template.op}), &#{r.name});"
+      return r
+    end
+    raise "can't expand register template: #{@template.class}"
+  end
+end
+
 class ReilInstruction
   @opnd_types
   @@seq = 0
@@ -400,6 +420,8 @@ class ReilInstruction
         if @op3.is_a?(NativeOperand)
           op = native_cast(@op3, op1typ, op2typ)
           reil_op3 = map_output_specific(@opnd_types[2], op, blk, post_stmts)
+        elsif @op3.is_a?(ReilRegTemplate)
+          reil_op3 = @op3.expand(blk)
         else
           throw CantHappenException.new("unknown output type: #{@op3.class}")
         end
@@ -737,6 +759,13 @@ sub.pattern([NativeReg, NativeMem, NativeImm], [NativeReg, NativeMem, NativeImm]
             [
              Sub.new(NativeOperand.new("op1"), NativeOperand.new("op2"), NativeOperand.new("op1"), :update_eflags => true)
              ])
+
+cmp = NativeInstruction.new("cmp", "INSTRUCTION_TYPE_CMP")
+cmp.pattern([NativeReg, NativeMem, NativeImm], [NativeReg, NativeMem, NativeImm],
+            [
+             Sub.new(NativeOperand.new("op1"), NativeOperand.new("op2"), ReilRegTemplate.new(NativeOperand.new("op1")), :update_eflags => true),
+            ])
+
 
 NativeInstruction.emit_insns
 NativeInstruction.emit_demux
