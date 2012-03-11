@@ -64,6 +64,7 @@ typedef enum _reil_instruction_index
     REIL_BISZ,
     REIL_JCC,
     /* Other instructions */
+    REIL_REDUCE,
     REIL_UNDEF,
     REIL_UNKN,
     REIL_NOP

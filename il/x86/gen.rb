@@ -417,6 +417,12 @@ class Add < ReilInstruction
     super(op1, op2, op3, options)
     @opnd_types = [[ReilImm, ReilReg], [ReilImm, ReilReg], [ReilReg]]
   end
+  def doublesizeme(blk, op)
+    raise ToBeDoneException("can't doublesize #{reil_op.class}") unless op.is_a?(ReilReg)
+    tmp_out = ReilReg.new_tmp(blk)
+    blk.stmts << "alloc_temp_reg(ctx, 2 * (#{op.sizeof}), &#{tmp_out});"
+    tmp_out
+  end
   def gen_insn(blk, op1, op2, op3)
     insn_name = ReilInstruction.newname
     size = ReilImm.new_tmp(blk)
@@ -426,10 +432,10 @@ class Add < ReilInstruction
     blk.stmts << "#{insn_name} = alloc_reil_instruction(ctx, REIL_ADD);"
     blk.stmts << "#{size.name}.value = #{op3.sizeof};"
     blk.stmts << "#{size.name}.size = 1;"
-    # XXX: need to make sure the dest is twice the size of the addends.
-    # That is, IF we want to go down that path...
-    blk.stmts << "gen_reduce_reg_int_reg(ctx, &#{op3.name}, &#{size.name}, &#{reduced.name});"
-    assign_operands(blk, insn_name, op1, op2, op3)
+    dbl = doublesizeme(blk, op3)
+
+    blk.stmts << "gen_reduce_reg_int_reg(ctx, &#{dbl.name}, &#{size.name}, &#{reduced.name});"
+    assign_operands(blk, insn_name, op1, op2, dbl)
     if @options[:update_eflags]
       blk.decls << "reil_operand op3;\t/* #{caller(0)[0]} */"
       blk.stmts << "assign_operand_register(&op3, &#{reduced.name});"

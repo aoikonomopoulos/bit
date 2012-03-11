@@ -587,13 +587,11 @@ static void gen_multiply_reg_int_reg(translation_context * context, reil_registe
 
 static void gen_reduce_reg_int_reg(translation_context * context, reil_register * reg, reil_integer * size, reil_register * result)
 {
-    reil_instruction * reduce  = alloc_reil_instruction(context, REIL_AND);
+    reil_instruction * reduce  = alloc_reil_instruction(context, REIL_REDUCE);
 
     assign_operand_register(&reduce->operands[0], reg);
 
-    reil_integer mask = {.value = (((1 << ((size->value << 3) - 1)) - 1) << 1) | 1, .size = size->value};
-
-    assign_operand_integer(&reduce->operands[1], &mask);
+    assign_operand_integer(&reduce->operands[1], size);
     
     alloc_temp_reg(context, size->value, result);
 
