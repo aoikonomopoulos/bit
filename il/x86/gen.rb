@@ -492,6 +492,22 @@ class Sub < ReilInstruction
   end
 end
 
+class And < ReilInstruction
+  def initialize(op1, op2, op3, options={})
+    super(op1, op2, op3, options)
+    @opnd_types = [[ReilImm, ReilReg], [ReilImm, ReilReg], [ReilReg]]
+  end
+  def gen_insn(blk, op1, op2, op3)
+    insn_name = ReilInstruction.newname
+    blk.decls << "reil_instruction *#{insn_name};"
+    blk.stmts << "#{insn_name} = alloc_reil_instruction(ctx, REIL_AND);"
+    assign_operands(blk, insn_name, op1, op2, op3)
+    if @options[:update_eflags]
+      blk.stmts << "gen_eflags_update(ctx, &#{insn_name}->operands[0], &#{insn_name}->operands[1], &#{insn_name}->operands[0]);"
+    end
+  end
+end
+
 class Ldm < ReilInstruction
   def initialize(op1, op2, op3, options={})
     super(op1, op2, op3, options)
@@ -764,6 +780,18 @@ cmp = NativeInstruction.new("cmp", "INSTRUCTION_TYPE_CMP")
 cmp.pattern([NativeReg, NativeMem, NativeImm], [NativeReg, NativeMem, NativeImm],
             [
              Sub.new(NativeOperand.new("op1"), NativeOperand.new("op2"), ReilRegTemplate.new(NativeOperand.new("op1")), :update_eflags => true),
+            ])
+
+and_insn = NativeInstruction.new("and", "INSTRUCTION_TYPE_AND")
+and_insn.pattern([NativeReg, NativeMem, NativeImm], [NativeReg, NativeMem, NativeImm],
+            [
+             And.new(NativeOperand.new("op1"), NativeOperand.new("op2"), NativeOperand.new("op1"), :update_eflags => true),
+            ])
+
+test = NativeInstruction.new("test", "INSTRUCTION_TYPE_TEST")
+test.pattern([NativeReg, NativeMem, NativeImm], [NativeReg, NativeMem, NativeImm],
+            [
+             And.new(NativeOperand.new("op1"), NativeOperand.new("op2"), ReilRegTemplate.new(NativeOperand.new("op1")), :update_eflags => true),
             ])
 
 
