@@ -97,6 +97,8 @@ static const char * x86reg_table[14][8] =
 #define X86_REG_ESP	0x4
 #define X86_REG_EBP	0x5
 
+#define X86_EFLAG_ZF	78
+
 #define EFLAG_NOT_IMPL  0x0
 #define EFLAG_BLANK     0x0
 #define EFLAG_TEST      0x1
@@ -286,6 +288,7 @@ static void gen_eflags_update(translation_context * context, reil_operand * op1,
 static void gen_arithmetic_instr(translation_context * context, reil_instruction_index index);
 static void gen_mov_instr(translation_context *ctx);
 static void gen_push_instr(translation_context * context);
+static void gen_cjmp_instr(translation_context * context);
 static void gen_pop_instr(translation_context * context);
 static void gen_ret_instr(translation_context * context);
 static void gen_call_instr(translation_context *ctx);
@@ -320,6 +323,9 @@ reil_instructions * reil_translate_from_x86(unsigned long base, unsigned long of
                 gen_arithmetic_instr(&context, REIL_DIV);
             }
             break;
+        case INSTRUCTION_TYPE_JMPC:
+	        gen_cjmp_instr(&context);
+		break;
         case INSTRUCTION_TYPE_CALL:
 		gen_call_instr(&context);
 		break;
@@ -1829,6 +1835,58 @@ static void gen_pop_instr(translation_context *ctx)
 		gen_load_reg_reg(ctx, &esp, &ebp);
 	} else
 		gen_unknown(ctx);
+}
+
+static void gen_cjmp_instr(translation_context *ctx)
+{
+	INSTRUCTION *x86_insn = ctx->x86instruction;
+	reil_instruction *jcc;
+	reil_register cc;
+	reil_register jmp_addr;
+	reil_register zf = {
+		.size = 1,
+		.index = X86_EFLAG_ZF
+	};
+
+	if (x86_insn->eflags_used == EFL_ZF) {
+		if (!strcmp(x86_insn->ptr->mnemonic, "jz")) {
+			cc = zf;
+		} else if (!strcmp(x86_insn->ptr->mnemonic, "jnz")) {
+			reil_instruction *bisz;
+			bisz = alloc_reil_instruction(ctx, REIL_BISZ);
+			assign_operand_register(&bisz->operands[REIL_OPERAND_INPUT1], &zf);
+
+			alloc_temp_reg(ctx, 1, &cc);
+			assign_operand_register(&bisz->operands[REIL_OPERAND_OUTPUT], &cc);
+		} else {
+			gen_unknown(ctx);
+		}
+	} else {
+		gen_unknown(ctx);
+		return;
+	}
+
+	jcc = alloc_reil_instruction(ctx, REIL_JCC);
+	assign_operand_register(&jcc->operands[REIL_OPERAND_INPUT1], &cc);
+
+	if (x86_insn->op1.type == OPERAND_TYPE_REGISTER) {
+		alloc_temp_reg(ctx, 4, &jmp_addr);
+		get_reil_reg_from_x86_op(ctx, &x86_insn->op1, &jmp_addr);
+		assign_operand_register(&jcc->operands[REIL_OPERAND_OUTPUT], &jmp_addr);
+	} else if (x86_insn->op1.type == OPERAND_TYPE_MEMORY) {
+		memory_offset offset;
+		calculate_memory_offset(ctx, &x86_insn->op1, &offset);
+		if (offset.type == REGISTER_OFFSET)
+			assign_operand_register(&jcc->operands[REIL_OPERAND_OUTPUT], &offset.reg);
+		else
+			assign_operand_integer(&jcc->operands[REIL_OPERAND_OUTPUT], &offset.integer);
+	} else if (x86_insn->op1.type == OPERAND_TYPE_IMMEDIATE) {
+		reil_integer imm;
+		get_reil_int_from_x86_op(ctx, &x86_insn->op1, &imm);
+		assign_operand_integer(&jcc->operands[REIL_OPERAND_OUTPUT], &imm);
+	} else {
+		abort();	/* XXX: cant_happen() */
+	}
 }
 
 #if 0
