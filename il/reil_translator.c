@@ -79,9 +79,7 @@ int main(int argc, char** argv)
                 }
             }
 
-            for ( i = 0; i < 79; i++)
-                printf("=");
-            printf("\n");
+	    printf("//****************************************************************************\n");
 
             free(instructions);
         }
