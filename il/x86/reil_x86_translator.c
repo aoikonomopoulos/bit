@@ -770,95 +770,79 @@ static void handle_eflag_rest(translation_context *ctx, int flag, reil_register 
 		abort();	/* cant_get_here() */
 }
 
-static void gen_eflags_update(translation_context * context, reil_operand * op1, reil_operand * op2, reil_operand * op3)
+static void gen_arith_cf_update(translation_context *ctx, reil_operand *op3)
 {
-    if (eflags_cross_reference[context->x86instruction->type].ef_cf & EFLAG_MODIFY)
-    {
         reil_integer shifts = {.value = (op3->reg.size << 2) - 1, .size = 1};
         reil_register shifted = {.index = 0, .size = 0};
-        gen_shr_reg_int_reg(context, &op3->reg, &shifts, &shifted);
-
         reil_integer size = {.value = EFLAGS_REGISTER_SIZE, .size = 1};
         reil_register carry;
 
-        gen_reduce_reg_int_reg(context, &shifted, &size, &carry);
-        gen_mov_reg_reg(context, &carry, &REG_CF);
-    } else
-	    handle_eflag_rest(context, eflags_cross_reference[context->x86instruction->type].ef_cf, &REG_CF);
+        gen_shr_reg_int_reg(ctx, &op3->reg, &shifts, &shifted);
 
-    /* Source: http://graphics.stanford.edu/~seander/bithacks.html#ParityParallel 
-     * unsigned char byte;
-     * byte ^= byte >> 4;
-     * byte &= 0xf;
-     * unsigned char parity = (0x6996 >> byte) & 1;
-     * */
-    if (eflags_cross_reference[context->x86instruction->type].ef_pf & EFLAG_MODIFY)
-    {
+        gen_reduce_reg_int_reg(ctx, &shifted, &size, &carry);
+        gen_mov_reg_reg(ctx, &carry, &REG_CF);
+}
+
+static void gen_arith_pf_update(translation_context *ctx, reil_operand * op3)
+{
+	/* Source: http://graphics.stanford.edu/~seander/bithacks.html#ParityParallel
+	 * unsigned char byte;
+	 * byte ^= byte >> 4;
+	 * byte &= 0xf;
+	 * unsigned char parity = (0x6996 >> byte) & 1;
+	 */
         /* Get the least-significant byte of the result */
         reil_integer lsb_size = {.value = 1, .size = 1};
         reil_register lsb;
-        gen_reduce_reg_int_reg(context, &op3->reg, &lsb_size, &lsb);
+        gen_reduce_reg_int_reg(ctx, &op3->reg, &lsb_size, &lsb);
         /* Shift the lsb by four bytes */
         reil_integer shifts = {.value = 4, .size = 1};
         reil_register shifted_lsb = {.index = 0, .size = 0};
-        gen_shr_reg_int_reg(context, &lsb, &shifts, &shifted_lsb);
+        gen_shr_reg_int_reg(ctx, &lsb, &shifts, &shifted_lsb);
         /* XOR the lower and higher nibles to compress the output in the lower nibble */
         reil_register compressed_lsb = {.index = 0, .size = 0};
-        gen_xor_reg_reg_reg(context, &lsb, &shifted_lsb, &compressed_lsb);
+        gen_xor_reg_reg_reg(ctx, &lsb, &shifted_lsb, &compressed_lsb);
         /* Obtain an index into the parity lookup table by removing the higher nibble */
         reil_integer lower_nibble_mask = {.value = 0xf, .size = 1};
         reil_register parity_index = {.index = 0, .size = 0};
-        gen_and_reg_int_reg(context, &compressed_lsb, &lower_nibble_mask, &parity_index);
+        gen_and_reg_int_reg(ctx, &compressed_lsb, &lower_nibble_mask, &parity_index);
         /* Store the parity lookup table into a temporary register */
         reil_register parity_lookup_table;
-        alloc_temp_reg(context, 2, &parity_lookup_table);
+        alloc_temp_reg(ctx, 2, &parity_lookup_table);
 
         reil_integer parity_lookup_table_value = {.value = 0x6996, .size = 2};
-        gen_mov_int_reg(context, &parity_lookup_table_value, &parity_lookup_table);
+        gen_mov_int_reg(ctx, &parity_lookup_table_value, &parity_lookup_table);
         /* Lookup the parity value in the lookup table */
         reil_register parity_lookup_table_entry = {.index = 0, .size = 0};
-        gen_shr_reg_reg_reg(context, &parity_lookup_table, &parity_index, &parity_lookup_table_entry);
+        gen_shr_reg_reg_reg(ctx, &parity_lookup_table, &parity_index, &parity_lookup_table_entry);
 
         reil_integer parity_mask = {.value = 1, .size = 1};
         reil_register parity = {.index = 0, .size = 0};
-        gen_and_reg_int_reg(context, &parity_lookup_table_entry, &parity_mask, &parity);
+        gen_and_reg_int_reg(ctx, &parity_lookup_table_entry, &parity_mask, &parity);
 
         reil_integer eflags_reg_size = {.value = EFLAGS_REGISTER_SIZE, .size = 1};
         reil_register reduced_parity;
-        gen_reduce_reg_int_reg(context, &parity, &eflags_reg_size, &reduced_parity);
+        gen_reduce_reg_int_reg(ctx, &parity, &eflags_reg_size, &reduced_parity);
 
-        gen_mov_reg_reg(context, &reduced_parity, &REG_PF);
-    } else
-	    handle_eflag_rest(context, eflags_cross_reference[context->x86instruction->type].ef_pf, &REG_PF);
+        gen_mov_reg_reg(ctx, &reduced_parity, &REG_PF);
+}
 
-    if (eflags_cross_reference[context->x86instruction->type].ef_af & EFLAG_MODIFY)
-    {
-    } else
-	    handle_eflag_rest(context, eflags_cross_reference[context->x86instruction->type].ef_af, &REG_AF);
-
-    if (eflags_cross_reference[context->x86instruction->type].ef_zf & EFLAG_MODIFY)
-    {
-        gen_is_zero_reg_reg(context, &op3->reg, &REG_ZF);
-    } else
-	    handle_eflag_rest(context, eflags_cross_reference[context->x86instruction->type].ef_zf, &REG_ZF);
-
-    if (eflags_cross_reference[context->x86instruction->type].ef_sf & EFLAG_MODIFY)
-    {
+static void gen_arith_sf_update(translation_context *ctx, reil_operand *op3)
+{
         /* Shift the MSB to the LSB */
         reil_integer shifts = {.value = (op3->reg.size << 3) - 1, .size = 1};
         reil_register sign_status = {.index = 0, .size = 0};
-        gen_shr_reg_int_reg(context, &op3->reg, &shifts, &sign_status);
+        gen_shr_reg_int_reg(ctx, &op3->reg, &shifts, &sign_status);
 
         reil_integer size = {.value = EFLAGS_REGISTER_SIZE, .size = 1};
         reil_register sign_flag;
-        gen_reduce_reg_int_reg(context, &sign_status, &size, &sign_flag);
+        gen_reduce_reg_int_reg(ctx, &sign_status, &size, &sign_flag);
 
-        gen_mov_reg_reg(context, &sign_flag, &REG_SF);
-    } else
-	    handle_eflag_rest(context, eflags_cross_reference[context->x86instruction->type].ef_sf, &REG_SF);
+        gen_mov_reg_reg(ctx, &sign_flag, &REG_SF);
+}
 
-    if (eflags_cross_reference[context->x86instruction->type].ef_of & EFLAG_MODIFY)
-    {
+static void gen_arith_of_update(translation_context * context, reil_operand * op1, reil_operand * op2, reil_operand * op3)
+{
         /* For addition we can use the formula !(INPUT1_SIGN ^ INPUT2_SIGN) && (INPUT1_SIGN ^ OUTPUT_SIGN),
          * which generates the following truth table.
          *
@@ -882,40 +866,33 @@ static void gen_eflags_update(translation_context * context, reil_operand * op1,
          * -------#--------#--------#---
          *
          * */
-        if (context->x86instruction->type == INSTRUCTION_TYPE_ADD )
-        {
-            reil_register xored_inputs = {.index = 0, .size = 0};
-            if ( op2->type == REIL_OPERAND_TYPE_REGISTER )
-            {
-                gen_xor_reg_reg_reg(context, &op1->reg, &op2->reg, &xored_inputs);
-            }
-            else /* REIL_OPERAND_TYPE_INTEGER */
-            {
-                gen_xor_reg_int_reg(context, &op1->reg, &op2->integer, &xored_inputs);
-            }
+        if (context->x86instruction->type == INSTRUCTION_TYPE_ADD ) {
+		reil_register xored_inputs = {.index = 0, .size = 0};
+		if ( op2->type == REIL_OPERAND_TYPE_REGISTER )
+			gen_xor_reg_reg_reg(context, &op1->reg, &op2->reg, &xored_inputs);
+		else	/* REIL_OPERAND_TYPE_INTEGER */
+			gen_xor_reg_int_reg(context, &op1->reg, &op2->integer, &xored_inputs);
+		reil_integer mask = {.value = -1, .size = xored_inputs.size};
+		reil_register neg_xored_inputs = {.index = 0, .size = 0};
+		gen_xor_reg_int_reg(context, &xored_inputs, &mask, &neg_xored_inputs);
 
-            reil_integer mask = {.value = -1, .size = xored_inputs.size};
-            reil_register neg_xored_inputs = {.index = 0, .size = 0};
-            gen_xor_reg_int_reg(context, &xored_inputs, &mask, &neg_xored_inputs);
+		reil_register xored_input1_output = {.index = 0, .size = 0};
+		gen_xor_reg_reg_reg(context, &op1->reg, &op3->reg, &xored_input1_output);
 
-            reil_register xored_input1_output = {.index = 0, .size = 0};
-            gen_xor_reg_reg_reg(context, &op1->reg, &op3->reg, &xored_input1_output);
+		reil_register anded_result = {.index = 0, .size = 0};
+		gen_and_reg_reg_reg(context, &neg_xored_inputs, &xored_input1_output, &anded_result);
 
-            reil_register anded_result = {.index = 0, .size = 0};
-            gen_and_reg_reg_reg(context, &neg_xored_inputs, &xored_input1_output, &anded_result);
+		/* The value of the OF flag is now in the sign bit of the anded result */
+		reil_integer shifts = {.value = (anded_result.size << 3) - 1, .size = 1};
+		reil_register overflow_status = {.index = 0, .size = 0};
+		gen_shr_reg_int_reg(context, &anded_result, &shifts, &overflow_status);
 
-            /* The value of the OF flag is now in the sign bit of the anded result */
-            reil_integer shifts = {.value = (anded_result.size << 3) - 1, .size = 1};
-            reil_register overflow_status = {.index = 0, .size = 0};
-            gen_shr_reg_int_reg(context, &anded_result, &shifts, &overflow_status);
+		/* Reduce the size */
+		reil_integer size = {.value = EFLAGS_REGISTER_SIZE, .size = 1};
+		reil_register overflow_flag = {0};
+		gen_reduce_reg_int_reg(context, &overflow_status, &size, &overflow_flag);
 
-            /* Reduce the size */
-            reil_integer size = {.value = EFLAGS_REGISTER_SIZE, .size = 1};
-            reil_register overflow_flag = {0};
-            gen_reduce_reg_int_reg(context, &overflow_status, &size, &overflow_flag);
-
-            gen_mov_reg_reg(context, &overflow_flag, &REG_OF);
-
+		gen_mov_reg_reg(context, &overflow_flag, &REG_OF);
         }
 
         /* For substraction we can use the formula (INPUT1_SIGN ^ INPUT2_SIGN) && (INPUT1_SIGN ^ OUTPUT_SIGN),
@@ -941,39 +918,64 @@ static void gen_eflags_update(translation_context * context, reil_operand * op1,
          * -------#--------#--------#---
          *
          * */
-        if (context->x86instruction->type == INSTRUCTION_TYPE_SUB)
-        {
-            reil_register xored_inputs = {.index = 0, .size = 0};
-            if ( op2->type == REIL_OPERAND_TYPE_REGISTER )
-            {
-                gen_xor_reg_reg_reg(context, &op1->reg, &op2->reg, &xored_inputs);
-            }
-            else /* REIL_OPERAND_TYPE_INTEGER */
-            {
-                gen_xor_reg_int_reg(context, &op1->reg, &op2->integer, &xored_inputs);
-            }
+        if (context->x86instruction->type == INSTRUCTION_TYPE_SUB) {
+		reil_register xored_inputs = {.index = 0, .size = 0};
+		if ( op2->type == REIL_OPERAND_TYPE_REGISTER )
+			gen_xor_reg_reg_reg(context, &op1->reg, &op2->reg, &xored_inputs);
+		else	/* REIL_OPERAND_TYPE_INTEGER */
+			gen_xor_reg_int_reg(context, &op1->reg, &op2->integer, &xored_inputs);
 
-            reil_register xored_input1_output = {.index = 0, .size = 0};
-            gen_xor_reg_reg_reg(context, &op1->reg, &op3->reg, &xored_input1_output);
+		reil_register xored_input1_output = {.index = 0, .size = 0};
+		gen_xor_reg_reg_reg(context, &op1->reg, &op3->reg, &xored_input1_output);
 
-            reil_register anded_result = {.index = 0, .size = 0};
-            gen_and_reg_reg_reg(context, &xored_inputs, &xored_input1_output, &anded_result);
+		reil_register anded_result = {.index = 0, .size = 0};
+		gen_and_reg_reg_reg(context, &xored_inputs, &xored_input1_output, &anded_result);
 
-            /* The value of the OF flag is now in the sign bit of the anded result */
-            reil_integer shifts = {.value = (anded_result.size << 3) - 1, .size = 1};
-            reil_register overflow_status = {0};
-            gen_shr_reg_int_reg(context, &anded_result, &shifts, &overflow_status);
+		/* The value of the OF flag is now in the sign bit of the anded result */
+		reil_integer shifts = {.value = (anded_result.size << 3) - 1, .size = 1};
+		reil_register overflow_status = {0};
+		gen_shr_reg_int_reg(context, &anded_result, &shifts, &overflow_status);
 
-            /* Reduce the size */
-            reil_integer size = {.value = EFLAGS_REGISTER_SIZE, .size = 1};
-            reil_register overflow_flag;
-            gen_reduce_reg_int_reg(context, &overflow_status, &size, &overflow_flag);
+		/* Reduce the size */
+		reil_integer size = {.value = EFLAGS_REGISTER_SIZE, .size = 1};
+		reil_register overflow_flag;
+		gen_reduce_reg_int_reg(context, &overflow_status, &size, &overflow_flag);
 
-            gen_mov_reg_reg(context, &overflow_flag, &REG_OF);
-
+		gen_mov_reg_reg(context, &overflow_flag, &REG_OF);
         }
-    } else
-	    handle_eflag_rest(context, eflags_cross_reference[context->x86instruction->type].ef_of, &REG_OF);
+}
+
+static void gen_eflags_update(translation_context *ctx, reil_operand *op1, reil_operand *op2, reil_operand *op3)
+{
+    if (eflags_cross_reference[ctx->x86instruction->type].ef_cf & EFLAG_MODIFY)
+	    gen_arith_cf_update(ctx, op3);
+    else
+	    handle_eflag_rest(ctx, eflags_cross_reference[ctx->x86instruction->type].ef_cf, &REG_CF);
+
+    if (eflags_cross_reference[ctx->x86instruction->type].ef_pf & EFLAG_MODIFY)
+	    gen_arith_pf_update(ctx, op3);
+    else
+	    handle_eflag_rest(ctx, eflags_cross_reference[ctx->x86instruction->type].ef_pf, &REG_PF);
+
+    if (eflags_cross_reference[ctx->x86instruction->type].ef_af & EFLAG_MODIFY)
+	    /* XXX: not_implemented("EFLAGS 'adjust' bit\n"); */;
+    else
+	    handle_eflag_rest(ctx, eflags_cross_reference[ctx->x86instruction->type].ef_af, &REG_AF);
+
+    if (eflags_cross_reference[ctx->x86instruction->type].ef_zf & EFLAG_MODIFY)
+	    gen_is_zero_reg_reg(ctx, &op3->reg, &REG_ZF);
+    else
+	    handle_eflag_rest(ctx, eflags_cross_reference[ctx->x86instruction->type].ef_zf, &REG_ZF);
+
+    if (eflags_cross_reference[ctx->x86instruction->type].ef_sf & EFLAG_MODIFY)
+	    gen_arith_sf_update(ctx, op3);
+    else
+	    handle_eflag_rest(ctx, eflags_cross_reference[ctx->x86instruction->type].ef_sf, &REG_SF);
+
+    if (eflags_cross_reference[ctx->x86instruction->type].ef_of & EFLAG_MODIFY)
+	    gen_arith_of_update(ctx, op1, op2, op3);
+    else
+	    handle_eflag_rest(ctx, eflags_cross_reference[ctx->x86instruction->type].ef_of, &REG_OF);
 }
 
 static void calculate_memory_offset(translation_context * context, POPERAND x86operand, memory_offset * offset)
