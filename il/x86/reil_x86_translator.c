@@ -35,6 +35,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "opcode_tables.h"
 #include "reil_x86_translator.h"
 
+#define not_implemented(...)	do {				\
+	    fprintf(stderr, "not implemented: ");		\
+	    fprintf(stderr, __VA_ARGS__);			\
+	    abort();						\
+    } while (0)
+
 /* Check for address/operand size override, copied from libdasm.c */
 
 static __inline__ enum Mode MODE_CHECK_ADDR(enum Mode mode, int flags) 
@@ -1986,11 +1992,23 @@ const char *reil_register_x86_formatter(reil_operand * register_operand)
 static unsigned char get_reil_int_from_x86_op(translation_context * context, POPERAND op, reil_integer * integer)
 {
     unsigned int imm;
-    if ( get_operand_immediate(op, &imm) )
-    {
-        integer->value = imm;
-        integer->size = get_x86operand_size(context->x86instruction, op);
-        return 1;
+    if (get_operand_immediate(op, &imm)) {
+	    integer->size = get_x86operand_size(context->x86instruction, op);	/* XXX: additions below? */
+	    switch (MASK_AM(op->flags)) {
+	    case AM_J:
+		    integer->value = imm + context->x86instruction->length + context->offset;
+		    break;
+	    case AM_I1:
+	    case AM_I:
+		    integer->value = imm;
+		    break;
+	    case AM_A:
+		    if (op->sectionbytes != 0)
+			    not_implemented("AM_A\n");
+		    integer->value = imm;
+		    break;
+	    }
+	    return 1;
     }
     /* XXX: return void */
     errx(3, "tried to get immediate from operand of type %d", op->type);
