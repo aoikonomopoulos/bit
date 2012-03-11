@@ -60,7 +60,7 @@ int main(int argc, char** argv)
             get_instruction_string(&x86_instruction, FORMAT_INTEL, c, x86_instruction_string,
                     sizeof(x86_instruction_string));
 
-            reil_instructions * instructions = reil_translate_from_x86(base, offset++, &x86_instruction);
+            reil_instructions * instructions = reil_translate_from_x86(base, offset, &x86_instruction);
             for ( i = 0; i < instructions->size; i++)
             {
                 reil_instruction * instruction = &instructions->instruction[i];
@@ -90,6 +90,7 @@ int main(int argc, char** argv)
             printf("%#8zx Invalid x86 instruction", c);
             len = 1;
         }
+	offset += len;
         c += len;
     } while ( c < buflen );
 
