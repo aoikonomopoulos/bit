@@ -95,7 +95,7 @@ class ReilReg < ReilOperand
   def ReilReg.new_tmp(blk)
     r = ReilReg.new("t#{@@seq}")
     @@seq += 1
-    blk.decls << "reil_register #{r.name};"
+    blk.decls << "reil_register #{r.name};\t/* #{caller[0]} */"
     r
   end
   def sizeof
@@ -117,7 +117,7 @@ class ReilReg < ReilOperand
       md = /\d+/.match(r.name)
       raise "internal error" unless md
       offset = "offset#{md[0]}"
-      blk.decls << "memory_offset #{offset};"
+      blk.decls << "memory_offset #{offset};\t/* #{caller(0)[0]} */"
       blk.stmts << "alloc_temp_reg(ctx, get_x86operand_size(x86_insn, &x86_insn->#{native_opnd.op}), &#{r.name});"
       blk.stmts << "calculate_memory_offset(ctx, &x86_insn->#{native_opnd.op}, &#{offset});"
       stmts << "if (#{offset}.type == REGISTER_OFFSET)"
@@ -148,7 +148,7 @@ class ReilReg < ReilOperand
       md = /\d+/.match(r.name)
       raise "internal error" unless md
       offset = "offset#{md[0]}"
-      blk.decls << "memory_offset #{offset};"
+      blk.decls << "memory_offset #{offset};\t/* #{caller(0)[0]} */"
       blk.stmts << "alloc_temp_reg(ctx, get_x86operand_size(x86_insn, &x86_insn->#{native_opnd.op}), &#{r.name});"
       blk.stmts << "calculate_memory_offset(ctx, &x86_insn->#{native_opnd.op}, &#{offset});"
       blk.stmts << "if (#{offset}.type == REGISTER_OFFSET)"
@@ -208,7 +208,7 @@ class ReilImm < ReilOperand
   def ReilImm.new_tmp(blk)
     i = ReilImm.new("i#{@@seq}")
     @@seq += 1
-    blk.decls << "reil_integer #{i.name};"
+    blk.decls << "reil_integer #{i.name};\t/* #{caller[0]} */"
     i
   end
   def ReilImm.to(native_opnd, blk, stmts)
@@ -431,7 +431,7 @@ class Add < ReilInstruction
     blk.stmts << "gen_reduce_reg_int_reg(ctx, &#{op3.name}, &#{size.name}, &#{reduced.name});"
     assign_operands(blk, insn_name, op1, op2, op3)
     if @options[:update_eflags]
-      blk.decls << "reil_operand op3;"
+      blk.decls << "reil_operand op3;\t/* #{caller(0)[0]} */"
       blk.stmts << "assign_operand_register(&op3, &#{reduced.name});"
       blk.stmts << "gen_eflags_update(ctx, &#{insn_name}->operands[0], &#{insn_name}->operands[1], &op3);"
     end
