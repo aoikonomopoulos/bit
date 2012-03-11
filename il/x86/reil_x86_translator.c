@@ -758,6 +758,18 @@ static void gen_is_not_zero_reg_reg(translation_context * context, reil_register
     gen_mov_reg_reg(context, &xor_result, output);
 }
 
+static void handle_eflag_rest(translation_context *ctx, int flag, reil_register *reg)
+{
+	if (flag & EFLAG_UNDEF)
+		gen_undef_reg(ctx, reg);
+	else if (flag & EFLAG_RESET)
+		gen_reset_reg(ctx, reg);
+	else if (flag & EFLAG_SET)
+		gen_set_reg(ctx, reg);
+	else
+		abort();	/* cant_get_here() */
+}
+
 static void gen_eflags_update(translation_context * context, reil_operand * op1, reil_operand * op2, reil_operand * op3)
 {
     if (eflags_cross_reference[context->x86instruction->type].ef_cf & EFLAG_MODIFY)
@@ -771,19 +783,8 @@ static void gen_eflags_update(translation_context * context, reil_operand * op1,
 
         gen_reduce_reg_int_reg(context, &shifted, &size, &carry);
         gen_mov_reg_reg(context, &carry, &REG_CF);
-    }
-    else if (eflags_cross_reference[context->x86instruction->type].ef_cf & EFLAG_UNDEF)
-    {
-        gen_undef_reg(context, &REG_CF);
-    }
-    else if (eflags_cross_reference[context->x86instruction->type].ef_cf & EFLAG_RESET)
-    {
-        gen_reset_reg(context, &REG_CF);
-    }
-    else if (eflags_cross_reference[context->x86instruction->type].ef_cf & EFLAG_SET)
-    {
-        gen_set_reg(context, &REG_CF);
-    }
+    } else
+	    handle_eflag_rest(context, eflags_cross_reference[context->x86instruction->type].ef_cf, &REG_CF);
 
     /* Source: http://graphics.stanford.edu/~seander/bithacks.html#ParityParallel 
      * unsigned char byte;
@@ -827,52 +828,19 @@ static void gen_eflags_update(translation_context * context, reil_operand * op1,
         gen_reduce_reg_int_reg(context, &parity, &eflags_reg_size, &reduced_parity);
 
         gen_mov_reg_reg(context, &reduced_parity, &REG_PF);
-    }
-    else if (eflags_cross_reference[context->x86instruction->type].ef_pf & EFLAG_UNDEF)
-    {
-        gen_undef_reg(context, &REG_PF);
-    }
-    else if (eflags_cross_reference[context->x86instruction->type].ef_pf & EFLAG_RESET)
-    {
-        gen_reset_reg(context, &REG_PF);
-    }
-    else if (eflags_cross_reference[context->x86instruction->type].ef_pf & EFLAG_SET)
-    {
-        gen_set_reg(context, &REG_PF);
-    }
+    } else
+	    handle_eflag_rest(context, eflags_cross_reference[context->x86instruction->type].ef_pf, &REG_PF);
 
     if (eflags_cross_reference[context->x86instruction->type].ef_af & EFLAG_MODIFY)
     {
-    }
-    else if (eflags_cross_reference[context->x86instruction->type].ef_af & EFLAG_UNDEF)
-    {
-        gen_undef_reg(context, &REG_AF);
-    }
-    else if (eflags_cross_reference[context->x86instruction->type].ef_af & EFLAG_RESET)
-    {
-        gen_reset_reg(context, &REG_AF);
-    }
-    else if (eflags_cross_reference[context->x86instruction->type].ef_af & EFLAG_SET)
-    {
-        gen_set_reg(context, &REG_AF);
-    }
+    } else
+	    handle_eflag_rest(context, eflags_cross_reference[context->x86instruction->type].ef_af, &REG_AF);
 
     if (eflags_cross_reference[context->x86instruction->type].ef_zf & EFLAG_MODIFY)
     {
         gen_is_zero_reg_reg(context, &op3->reg, &REG_ZF);
-    }
-    else if (eflags_cross_reference[context->x86instruction->type].ef_zf & EFLAG_UNDEF)
-    {
-        gen_undef_reg(context, &REG_ZF);
-    }
-    else if (eflags_cross_reference[context->x86instruction->type].ef_zf & EFLAG_RESET)
-    {
-        gen_reset_reg(context, &REG_ZF);
-    }
-    else if (eflags_cross_reference[context->x86instruction->type].ef_zf & EFLAG_SET)
-    {
-        gen_set_reg(context, &REG_ZF);
-    }
+    } else
+	    handle_eflag_rest(context, eflags_cross_reference[context->x86instruction->type].ef_zf, &REG_ZF);
 
     if (eflags_cross_reference[context->x86instruction->type].ef_sf & EFLAG_MODIFY)
     {
@@ -886,19 +854,8 @@ static void gen_eflags_update(translation_context * context, reil_operand * op1,
         gen_reduce_reg_int_reg(context, &sign_status, &size, &sign_flag);
 
         gen_mov_reg_reg(context, &sign_flag, &REG_SF);
-    }
-    else if (eflags_cross_reference[context->x86instruction->type].ef_sf & EFLAG_UNDEF)
-    {
-        gen_undef_reg(context, &REG_SF);
-    }
-    else if (eflags_cross_reference[context->x86instruction->type].ef_sf & EFLAG_RESET)
-    {
-        gen_reset_reg(context, &REG_SF);
-    }
-    else if (eflags_cross_reference[context->x86instruction->type].ef_sf & EFLAG_SET)
-    {
-        gen_set_reg(context, &REG_SF);
-    }
+    } else
+	    handle_eflag_rest(context, eflags_cross_reference[context->x86instruction->type].ef_sf, &REG_SF);
 
     if (eflags_cross_reference[context->x86instruction->type].ef_of & EFLAG_MODIFY)
     {
@@ -1015,19 +972,8 @@ static void gen_eflags_update(translation_context * context, reil_operand * op1,
             gen_mov_reg_reg(context, &overflow_flag, &REG_OF);
 
         }
-    }
-    else if (eflags_cross_reference[context->x86instruction->type].ef_of & EFLAG_UNDEF)
-    {
-        gen_undef_reg(context, &REG_OF);
-    }
-    else if (eflags_cross_reference[context->x86instruction->type].ef_of & EFLAG_RESET)
-    {
-        gen_reset_reg(context, &REG_OF);
-    }
-    else if (eflags_cross_reference[context->x86instruction->type].ef_of & EFLAG_SET)
-    {
-        gen_set_reg(context, &REG_OF);
-    }
+    } else
+	    handle_eflag_rest(context, eflags_cross_reference[context->x86instruction->type].ef_of, &REG_OF);
 }
 
 static void calculate_memory_offset(translation_context * context, POPERAND x86operand, memory_offset * offset)
