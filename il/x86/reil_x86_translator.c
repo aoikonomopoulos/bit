@@ -242,213 +242,175 @@ typedef struct
     };
 } memory_offset;
 
-static size_t get_x86operand_size(INSTRUCTION * x86instruction, OPERAND * x86operand);
-static void get_x86operand_basereg(PINSTRUCTION x86instruction, POPERAND x86operand, reil_register * base);
-static void get_x86operand_indexreg(PINSTRUCTION x86instruction, POPERAND x86operand, reil_register * index);
-static void init_translation_context(translation_context * context, INSTRUCTION * x86instruction, unsigned long base, unsigned long offset);
-static void calculate_memory_offset(translation_context * context, POPERAND x86operand, memory_offset * offset);
-static void alloc_temp_reg(translation_context * context, size_t size, reil_register * temp_reg);
-static reil_instruction * alloc_reil_instruction(translation_context * context, reil_instruction_index index);
-static void get_reil_reg_from_x86_op(translation_context * context, POPERAND op, reil_register * reg);
-static unsigned char get_reil_int_from_x86_op(translation_context * context, POPERAND op, reil_integer * integer);
-
-static void assign_operand_register(reil_operand * operand, reil_register * reg);
-static void assign_operand_integer(reil_operand * operand, reil_integer * integer);
-static void assign_reg_reg(reil_register * src, reil_register * dest);
-
-/* Basic REIL instruction generation functions */
-static void gen_unknown(translation_context * context);
-static void gen_undef_reg(translation_context * context, reil_register * reg);
-static void gen_mov_reg_reg(translation_context * context, reil_register * src, reil_register * dest);
-static void gen_mov_int_reg(translation_context * context, reil_integer * src, reil_register * dest);
-static void gen_set_reg(translation_context * context , reil_register * reg);
-static void gen_reset_reg(translation_context * context , reil_register * reg);
-static void gen_store_reg_reg(translation_context * context, reil_register * value, reil_register * address);
-static void gen_store_reg_int(translation_context * context, reil_register * value, reil_integer * address);
-static void gen_load_reg_reg(translation_context * context, reil_register * address, reil_register * value);
-static void gen_load_int_reg(translation_context * context, reil_integer * address, reil_register * value);
-static void gen_add_reg_int_reg(translation_context * context, reil_register * addend1, reil_integer * addend2, reil_register * result);
-static void gen_add_reg_reg_reg(translation_context * context, reil_register * addend1, reil_register * addend2, reil_register * result);
-static void gen_multiply_reg_int_reg(translation_context * context, reil_register * multiplicand, reil_integer * multiplier, reil_register * result);
-static void gen_reduce_reg_int_reg(translation_context * context, reil_register * reg, reil_integer * size, reil_register * result);
-static void gen_shx_reg_int_reg(translation_context * context, reil_instruction_index shift_op, reil_register * src, reil_integer * shifts, reil_register * result);
-static void gen_shx_reg_reg_reg(translation_context * context, reil_instruction_index shift_op, reil_register * src, reil_register * shifts, reil_register * result);
-static void gen_shl_reg_int_reg(translation_context * context, reil_register * src, reil_integer * shifts, reil_register * result);
-static void gen_shr_reg_int_reg(translation_context * context, reil_register * src, reil_integer * shifts, reil_register * result);
-static void gen_shl_reg_reg_reg(translation_context * context, reil_register * src, reil_register * shifts, reil_register * result);
-static void gen_shr_reg_reg_reg(translation_context * context, reil_register * src, reil_register * shifts, reil_register * result);
-static void gen_and_reg_reg_reg(translation_context * context, reil_register * reg1, reil_register * reg2, reil_register * result);
-static void gen_and_reg_int_reg(translation_context * context, reil_register * reg, reil_integer * integer, reil_register * result);
-static void gen_xor_reg_int_reg(translation_context * context, reil_register * input1, reil_integer * input2, reil_register * result);
-static void gen_xor_reg_reg_reg(translation_context * context, reil_register * input1, reil_register * input2, reil_register * result);
-static void gen_or_reg_reg_reg(translation_context * context, reil_register * input1, reil_register * input2, reil_register * result);
-
-static void gen_is_zero_reg_reg(translation_context * context, reil_register * input, reil_register * output);
-static void gen_is_not_zero_reg_reg(translation_context * context, reil_register * input, reil_register * output);
-
-static void gen_eflags_update(translation_context * context, reil_operand * op1, reil_operand * op2, reil_operand * op3);
-
-/* REIL instruction group generation functions */
-static void gen_arithmetic_instr(translation_context * context, reil_instruction_index index);
-static void gen_mov_instr(translation_context *ctx);
-static void gen_push_instr(translation_context * context);
-static void gen_cjmp_instr(translation_context * context);
-static void gen_pop_instr(translation_context * context);
-static void gen_ret_instr(translation_context * context);
-static void gen_call_instr(translation_context *ctx);
-static void insn_mux(translation_context *ctx);
-
-reil_instructions * reil_translate_from_x86(unsigned long base, unsigned long offset, INSTRUCTION * x86instruction)
+static void assign_operand_register(reil_operand * operand, reil_register * reg)
 {
-    translation_context context;
-    init_translation_context(&context, x86instruction, base, offset);
-
-    reil_instructions * instructions = NULL;
-
-    switch (x86instruction->type)
-    {
-        case INSTRUCTION_TYPE_MUL:
-            {
-                gen_arithmetic_instr(&context, REIL_MUL);
-            }
-            break;
-        case INSTRUCTION_TYPE_IMUL:
-            {
-                gen_arithmetic_instr(&context, REIL_MUL);
-            }
-            break;
-        case INSTRUCTION_TYPE_DIV:
-            {
-                gen_arithmetic_instr(&context, REIL_DIV);
-            }
-            break;
-        case INSTRUCTION_TYPE_IDIV:
-            {
-                gen_arithmetic_instr(&context, REIL_DIV);
-            }
-            break;
-        case INSTRUCTION_TYPE_JMPC:
-	        gen_cjmp_instr(&context);
-		break;
-        case INSTRUCTION_TYPE_CALL:
-		gen_call_instr(&context);
-		break;
-        case INSTRUCTION_TYPE_POP:
-		gen_pop_instr(&context);
-		break;
-        case INSTRUCTION_TYPE_ADD:
-        case INSTRUCTION_TYPE_SUB:
-        case INSTRUCTION_TYPE_CMP:
-        case INSTRUCTION_TYPE_AND:
-        case INSTRUCTION_TYPE_TEST:
-        case INSTRUCTION_TYPE_MOV:
-        case INSTRUCTION_TYPE_PUSH:
-        case INSTRUCTION_TYPE_RET:
-		insn_mux(&context);
-		break;
-
-        default:
-            {
-                gen_unknown(&context);
-            }
-            break;
-    }
-
-    if ( context.num_of_instructions > 0)
-    {
-        instructions = malloc(sizeof(reil_instructions) + context.num_of_instructions * sizeof(reil_instruction));
-        if (!instructions)
-        {
-            fprintf(stderr, "Failed to allocate memory for translated instructions!");
-            exit(EXIT_FAILURE);
-        }
-        instructions->size = context.num_of_instructions;
-
-        size_t i, j;
-        /* Prepare sort buffer for sorting */
-        for ( i = 0; i < context.num_of_instructions; i++)
-        {
-            context.instruction_sort_buffer[i] = &context.instruction_buffer[i];
-        }
-
-        /* Bubblesort the sort buffer. */
-        for ( i = 0; i < context.num_of_instructions - 1; i++)
-        {
-            for ( j = i+1; j < context.num_of_instructions; j++ )
-            {
-                if ( context.instruction_sort_buffer[i]->offset > context.instruction_sort_buffer[j]->offset)
-                {
-                    reil_instruction * tmp = context.instruction_sort_buffer[i];
-                    context.instruction_sort_buffer[i] = context.instruction_sort_buffer[j];
-                    context.instruction_sort_buffer[j] = tmp;
-                }
-            }
-        }
-
-        /* Copy the sorted instructions */
-        for ( i = 0; i < context.num_of_instructions; i++)
-        {
-            memcpy(&instructions->instruction[i], context.instruction_sort_buffer[i], sizeof(reil_instruction));
-        }
-    }
-    else
-    {
-        fprintf(stderr, "Failed to translate instruction!");
-        exit(EXIT_FAILURE);
-    }
-
-    return instructions;
+	operand->type = REIL_OPERAND_TYPE_REGISTER;
+	operand->reg.index = reg->index;
+	operand->reg.size = reg->size;
 }
+
+static void assign_operand_integer(reil_operand * operand, reil_integer * integer)
+{
+	operand->type = REIL_OPERAND_TYPE_INTEGER;
+	operand->integer.value = integer->value;
+	operand->integer.size = integer->size;
+}
+
+static void assign_reg_reg(reil_register * src, reil_register * dest)
+{
+	dest->index = src->index;
+	dest->size = src->size;
+}
+
 
 size_t get_x86operand_size(INSTRUCTION * x86instruction, OPERAND * x86operand)
 {
-    size_t size = 0;
-    switch (MASK_OT(x86operand->flags)) {
+	size_t size = 0;
+	enum Mode mode;
+
+	switch (MASK_OT(x86operand->flags)) {
         case OT_b:
-            size = 1;
-            break;
+		size = 1;
+		break;
         case OT_v:
-            {
-                enum Mode mode = MODE_CHECK_OPERAND(x86instruction->mode, x86instruction->flags);
+                mode = MODE_CHECK_OPERAND(x86instruction->mode, x86instruction->flags);
                 size = (mode == MODE_32)?4:2;
-            }
-            break;
+		break;
         case OT_w:
-            size = 2;
-            break;
+		size = 2;
+		break;
         case OT_d:
-            size = 4;
-            break;
-    }
-    return size;
+		size = 4;
+		break;
+	}
+	return size;
 }
 
 static void get_x86operand_basereg(PINSTRUCTION x86instruction, POPERAND x86operand, reil_register * base)
 {
-    int basereg = get_operand_basereg(x86operand);
-    if ( basereg == REG_NOP )
-    {
-        base->size = 0;
-        return;
-    }
-    base->index = (REG_GEN_DWORD << 3) + basereg;
-    /* Use the size of the operand for the correct size, instead of using
-     * the size of the register. */
-    base->size = get_x86operand_size(x86instruction, x86operand);
+	int basereg = get_operand_basereg(x86operand);
+	if (basereg == REG_NOP) {
+		base->size = 0;
+		return;
+	}
+	base->index = (REG_GEN_DWORD << 3) + basereg;
+	/*
+	 * Use the size of the operand for the correct size, instead of using
+	 * the size of the register.
+	 */
+	base->size = get_x86operand_size(x86instruction, x86operand);
 }
 
 static void get_x86operand_indexreg(PINSTRUCTION x86instruction, POPERAND x86operand, reil_register * index)
 {
-    int indexreg = get_operand_indexreg(x86operand);
-    if ( indexreg == REG_NOP )
-    {
-        index->size = 0;
-        return;
-    }
-    index->index = (REG_GEN_DWORD << 3) + indexreg;
-    /* Use the size of the operand for the correct size, instead of using
-     * the size of the register. */
-    index->size = get_x86operand_size(x86instruction, x86operand);
+	int indexreg = get_operand_indexreg(x86operand);
+	if (indexreg == REG_NOP) {
+		index->size = 0;
+		return;
+	}
+	index->index = (REG_GEN_DWORD << 3) + indexreg;
+	/* Use the size of the operand for the correct size, instead of using
+	 * the size of the register. */
+	index->size = get_x86operand_size(x86instruction, x86operand);
+}
+
+static void get_reil_reg_from_x86_op(translation_context * context, POPERAND op, reil_register * reg)
+{
+	int regtype = 0;
+	size_t regsize = 0;
+	// Determine register type
+	switch (MASK_AM(op->flags)) {
+        case AM_REG:
+		if (MASK_FLAGS(op->flags) == F_r) {
+			regtype = REG_SEGMENT;
+			regsize = 2;
+		} else if (MASK_FLAGS(op->flags) == F_f)
+			regtype = REG_FPU;
+		else
+			regtype = REG_GEN_DWORD;
+		break;
+        case AM_E:
+        case AM_G:
+        case AM_R:
+		regtype = REG_GEN_DWORD;
+		break;
+		// control register encoded in MODRM
+        case AM_C:
+		regtype = REG_CONTROL;
+		break;
+		// debug register encoded in MODRM
+        case AM_D:
+		regtype = REG_DEBUG;
+		break;
+		// Segment register encoded in MODRM
+        case AM_S:
+		regtype = REG_SEGMENT;
+		break;
+		// TEST register encoded in MODRM
+        case AM_T:
+		regtype = REG_TEST;
+		break;
+		// MMX register encoded in MODRM
+        case AM_P:
+        case AM_Q:
+		regtype = REG_MMX;
+		break;
+		// XMM register encoded in MODRM
+        case AM_V:
+        case AM_W:
+		regtype = REG_XMM;
+		break;
+	}
+
+	if (regtype == REG_GEN_DWORD) {
+		enum Mode operand_mode = MODE_CHECK_OPERAND(context->x86instruction->mode, context->x86instruction->flags);
+		switch (MASK_OT(op->flags)) 
+		{
+		case OT_b:
+			reg->index = (REG_GEN_BYTE << 3) + op->reg;
+			reg->size = 1;
+			break;
+		case OT_v:
+			reg->index = (operand_mode == MODE_32)?(REG_GEN_DWORD << 3) + op->reg:(REG_GEN_WORD << 3) + op->reg;
+			reg->size = (operand_mode == MODE_32)?4:2;
+			break;
+		case OT_w:
+			reg->index = (REG_GEN_WORD << 3) + op->reg;
+			reg->size = 2;
+			break;
+		case OT_d:
+			reg->index = (REG_GEN_DWORD << 3) + op->reg;
+			reg->size = 4;
+			break;
+		}
+	} else {
+		reg->size = 0;
+	}
+}
+
+static unsigned char get_reil_int_from_x86_op(translation_context * context, POPERAND op, reil_integer * integer)
+{
+	unsigned int imm;
+	if (get_operand_immediate(op, &imm)) {
+		integer->size = get_x86operand_size(context->x86instruction, op);	/* XXX: additions below? */
+		switch (MASK_AM(op->flags)) {
+		case AM_J:
+			integer->value = imm + context->x86instruction->length + context->offset;
+			break;
+		case AM_I1:
+		case AM_I:
+			integer->value = imm;
+			break;
+		case AM_A:
+			if (op->sectionbytes != 0)
+				not_implemented("AM_A\n");
+			integer->value = imm;
+			break;
+		}
+		return 1;
+	}
+	/* XXX: return void */
+	errx(3, "tried to get immediate from operand of type %d", op->type);
 }
 
 static void init_translation_context(translation_context * context, INSTRUCTION * x86instruction, unsigned long base, unsigned long offset)
@@ -1885,84 +1847,6 @@ static void gen_ret_instr(translation_context *ctx)
 }
 #endif
 
-static void get_reil_reg_from_x86_op(translation_context * context, POPERAND op, reil_register * reg)
-{
-	int regtype = 0;
-    size_t regsize = 0;
-    // Determine register type
-    switch (MASK_AM(op->flags)) {
-        case AM_REG:
-            if (MASK_FLAGS(op->flags) == F_r)
-            {
-                regtype = REG_SEGMENT;
-                regsize = 2;
-            }
-            else if (MASK_FLAGS(op->flags) == F_f)
-                regtype = REG_FPU;
-            else
-                regtype = REG_GEN_DWORD;
-            break;
-        case AM_E:
-        case AM_G:
-        case AM_R:
-            regtype = REG_GEN_DWORD;
-            break;
-            // control register encoded in MODRM
-        case AM_C:
-            regtype = REG_CONTROL;
-            break;
-            // debug register encoded in MODRM
-        case AM_D:
-            regtype = REG_DEBUG;
-            break;
-            // Segment register encoded in MODRM
-        case AM_S:
-            regtype = REG_SEGMENT;
-            break;
-            // TEST register encoded in MODRM
-        case AM_T:
-            regtype = REG_TEST;
-            break;
-            // MMX register encoded in MODRM
-        case AM_P:
-        case AM_Q:
-            regtype = REG_MMX;
-            break;
-            // XMM register encoded in MODRM
-        case AM_V:
-        case AM_W:
-            regtype = REG_XMM;
-            break;
-    }
-
-    if (regtype == REG_GEN_DWORD) 
-    {
-        enum Mode operand_mode = MODE_CHECK_OPERAND(context->x86instruction->mode, context->x86instruction->flags);
-        switch (MASK_OT(op->flags)) 
-        {
-            case OT_b:
-                reg->index = (REG_GEN_BYTE << 3) + op->reg;
-                reg->size = 1;
-                break;
-            case OT_v:
-                reg->index = (operand_mode == MODE_32)?(REG_GEN_DWORD << 3) + op->reg:(REG_GEN_WORD << 3) + op->reg;
-                reg->size = (operand_mode == MODE_32)?4:2;
-                break;
-            case OT_w:
-                reg->index = (REG_GEN_WORD << 3) + op->reg;
-                reg->size = 2;
-                break;
-            case OT_d:
-                reg->index = (REG_GEN_DWORD << 3) + op->reg;
-                reg->size = 4;
-                break;
-        }
-    } 
-    else
-    {
-        reg->size = 0;
-    }
-}
 
 const char *reil_register_x86_formatter(reil_operand * register_operand)
 {
@@ -2005,49 +1889,82 @@ const char *reil_register_x86_formatter(reil_operand * register_operand)
     return format_buffer;
 }
 
-static unsigned char get_reil_int_from_x86_op(translation_context * context, POPERAND op, reil_integer * integer)
-{
-    unsigned int imm;
-    if (get_operand_immediate(op, &imm)) {
-	    integer->size = get_x86operand_size(context->x86instruction, op);	/* XXX: additions below? */
-	    switch (MASK_AM(op->flags)) {
-	    case AM_J:
-		    integer->value = imm + context->x86instruction->length + context->offset;
-		    break;
-	    case AM_I1:
-	    case AM_I:
-		    integer->value = imm;
-		    break;
-	    case AM_A:
-		    if (op->sectionbytes != 0)
-			    not_implemented("AM_A\n");
-		    integer->value = imm;
-		    break;
-	    }
-	    return 1;
-    }
-    /* XXX: return void */
-    errx(3, "tried to get immediate from operand of type %d", op->type);
-}
 
-static void assign_operand_register(reil_operand * operand, reil_register * reg)
-{
-    operand->type = REIL_OPERAND_TYPE_REGISTER;
-    operand->reg.index = reg->index;
-    operand->reg.size = reg->size;
-}
-
-static void assign_operand_integer(reil_operand * operand, reil_integer * integer)
-{
-    operand->type = REIL_OPERAND_TYPE_INTEGER;
-    operand->integer.value = integer->value;
-    operand->integer.size = integer->size;
-}
-
-static void assign_reg_reg(reil_register * src, reil_register * dest)
-{
-    dest->index = src->index;
-    dest->size = src->size;
-}
 
 #include "reil_x86_autogen_translator.c"
+
+reil_instructions * reil_translate_from_x86(unsigned long base, unsigned long offset, INSTRUCTION * x86instruction)
+{
+	translation_context context;
+	init_translation_context(&context, x86instruction, base, offset);
+
+	reil_instructions * instructions = NULL;
+
+	switch (x86instruction->type) {
+        case INSTRUCTION_TYPE_MUL:
+                gen_arithmetic_instr(&context, REIL_MUL);
+		break;
+        case INSTRUCTION_TYPE_IMUL:
+                gen_arithmetic_instr(&context, REIL_MUL);
+		break;
+        case INSTRUCTION_TYPE_DIV:
+                gen_arithmetic_instr(&context, REIL_DIV);
+		break;
+        case INSTRUCTION_TYPE_IDIV:
+                gen_arithmetic_instr(&context, REIL_DIV);
+		break;
+        case INSTRUCTION_TYPE_JMPC:
+	        gen_cjmp_instr(&context);
+		break;
+        case INSTRUCTION_TYPE_CALL:
+		gen_call_instr(&context);
+		break;
+        case INSTRUCTION_TYPE_POP:
+		gen_pop_instr(&context);
+		break;
+        case INSTRUCTION_TYPE_ADD:
+        case INSTRUCTION_TYPE_SUB:
+        case INSTRUCTION_TYPE_CMP:
+        case INSTRUCTION_TYPE_AND:
+        case INSTRUCTION_TYPE_TEST:
+        case INSTRUCTION_TYPE_MOV:
+        case INSTRUCTION_TYPE_PUSH:
+        case INSTRUCTION_TYPE_RET:
+		insn_mux(&context);
+		break;
+        default:
+                gen_unknown(&context);
+		break;
+	}
+
+	if (context.num_of_instructions > 0) {
+		instructions = malloc(sizeof(reil_instructions) + context.num_of_instructions * sizeof(reil_instruction));
+		if (!instructions) {
+			fprintf(stderr, "Failed to allocate memory for translated instructions!");
+			exit(EXIT_FAILURE);
+		}
+		instructions->size = context.num_of_instructions;
+
+		size_t i, j;
+		/* Prepare sort buffer for sorting */
+		for ( i = 0; i < context.num_of_instructions; i++)
+			context.instruction_sort_buffer[i] = &context.instruction_buffer[i];
+		/* Bubblesort the sort buffer. */
+		for ( i = 0; i < context.num_of_instructions - 1; i++)
+			for ( j = i+1; j < context.num_of_instructions; j++ )
+				if ( context.instruction_sort_buffer[i]->offset > context.instruction_sort_buffer[j]->offset) {
+					reil_instruction * tmp = context.instruction_sort_buffer[i];
+					context.instruction_sort_buffer[i] = context.instruction_sort_buffer[j];
+					context.instruction_sort_buffer[j] = tmp;
+				}
+
+		/* Copy the sorted instructions */
+		for ( i = 0; i < context.num_of_instructions; i++)
+			memcpy(&instructions->instruction[i], context.instruction_sort_buffer[i], sizeof(reil_instruction));
+	} else {
+		fprintf(stderr, "Failed to translate instruction!");
+		exit(EXIT_FAILURE);
+	}
+
+	return instructions;
+}
